@@ -9,7 +9,7 @@ static esp_err_t gpio_esp32_pin_configure(const struct device *port, gpio_num_t 
     (void)port;
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << pin),
-        .mode = (flags & GPIO_DT_OUTPUT) ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT,
+        .mode = (flags & GPIO_DT_OUTPUT) ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_INPUT,
         .pull_up_en = (flags & GPIO_DT_PULL_UP) ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
         .pull_down_en = (flags & GPIO_DT_PULL_DOWN) ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
@@ -46,7 +46,7 @@ esp_err_t gpio_esp32_init(const struct device *dev)
     (void)dev;
 
     /* Install the shared GPIO ISR dispatcher. All devices that use
-     * gpio_isr_handler_add() depend on this — doing it here guarantees
+     * gpio_isr_handler_add() depend on this -- doing it here guarantees
      * the service is ready before any peripheral device_init() runs. */
     esp_err_t ret = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
@@ -65,4 +65,4 @@ const struct gpio_api gpio_esp32_api = {
 };
 
 _Static_assert(sizeof(gpio_esp32_api) == sizeof(struct gpio_api),
-               "gpio_esp32_api size mismatch — struct gpio_api may have new fields");
+               "gpio_esp32_api size mismatch -- struct gpio_api may have new fields");

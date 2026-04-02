@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Intercreate
  *
- * Subsystem watchdog — detect hung subsystems.
+ * Subsystem watchdog -- detect hung subsystems.
  *
  * Usage:
  *   // Registration (at init)

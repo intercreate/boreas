@@ -25,7 +25,7 @@ typedef struct _dlist {
     sys_dnode_t head; /* sentinel node */
 } sys_dlist_t;
 
-/* Static initializer — head points to itself (empty) */
+/* Static initializer -- head points to itself (empty) */
 #define SYS_DLIST_STATIC_INIT(ptr_to_list) \
     {.head = {.next = &(ptr_to_list)->head, .prev = &(ptr_to_list)->head}}
 

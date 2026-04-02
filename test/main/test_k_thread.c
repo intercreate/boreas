@@ -8,7 +8,7 @@
 
 /*
  * Note: All threads use xTaskCreateStatic (static TCB + stack).
- * Static tasks must NOT call vTaskDelete(NULL) — FreeRTOS will try
+ * Static tasks must NOT call vTaskDelete(NULL) -- FreeRTOS will try
  * to free() the TCB which isn't heap-allocated. Instead, threads
  * signal completion and suspend; the test cleans up via k_thread_abort.
  */
@@ -19,7 +19,7 @@ static void thread_entry(void *p1)
 {
     volatile int *flag = (volatile int *)p1;
     *flag = 42;
-    vTaskSuspend(NULL); /* Suspend self — test will abort us */
+    vTaskSuspend(NULL); /* Suspend self -- test will abort us */
 }
 
 static void test_thread_create_and_run(void)
@@ -106,7 +106,7 @@ static void short_entry(void *p1)
 {
     k_msleep(50);
     join_flag = 1;
-    vTaskSuspend(NULL); /* Signal done, suspend — join detects suspended state */
+    vTaskSuspend(NULL); /* Signal done, suspend -- join detects suspended state */
 }
 
 static void test_thread_join(void)

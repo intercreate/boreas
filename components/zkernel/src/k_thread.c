@@ -20,11 +20,11 @@ struct thread_args {
 static void k_thread_entry_wrapper(void *arg)
 {
     struct k_thread *thread = (struct k_thread *)arg;
-    /* Arguments are stashed after the TCB — we use a simple convention:
+    /* Arguments are stashed after the TCB -- we use a simple convention:
      * p1 is passed via FreeRTOS task arg, p2 and p3 are NULL for now.
      * Full 3-arg support requires storing args in the k_thread struct. */
     (void)thread;
-    /* This is a simplified wrapper — full implementation will store
+    /* This is a simplified wrapper -- full implementation will store
      * entry + args in k_thread struct */
     vTaskDelete(NULL);
 }

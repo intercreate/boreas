@@ -2,7 +2,7 @@
 
 Zephyr-compatible kernel APIs and device model for ESP-IDF.
 
-Boreas provides a thin, tested abstraction layer that brings Zephyr RTOS API conventions to ESP-IDF projects running on FreeRTOS. Named for the Greek god of the north wind — a sibling to Zephyr (west wind).
+Boreas provides a thin, tested abstraction layer that brings Zephyr RTOS API conventions to ESP-IDF projects running on FreeRTOS. Named for the Greek god of the north wind -- a sibling to Zephyr (west wind).
 
 ## Components
 

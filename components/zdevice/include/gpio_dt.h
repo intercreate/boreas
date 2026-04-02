@@ -9,13 +9,13 @@
 #include "esp_log.h"
 #include "zephyr/sys/util.h"
 
-/* Bits 0-7: dt_flags — board-level properties, stored in gpio_dt_spec.dt_flags (uint8_t) */
+/* Bits 0-7: dt_flags -- board-level properties, stored in gpio_dt_spec.dt_flags (uint8_t) */
 #define GPIO_DT_ACTIVE_LOW  BIT(0)
 #define GPIO_DT_OPEN_DRAIN  BIT(1) /* reserved */
 #define GPIO_DT_OPEN_SOURCE BIT(2) /* reserved */
 /* bits 3-7 reserved for future dt properties */
 
-/* Bits 8+: configure-time flags — passed to gpio_pin_configure_dt() at runtime */
+/* Bits 8+: configure-time flags -- passed to gpio_pin_configure_dt() at runtime */
 #define GPIO_DT_INPUT     BIT(8)
 #define GPIO_DT_OUTPUT    BIT(9)
 #define GPIO_DT_PULL_UP   BIT(10)
