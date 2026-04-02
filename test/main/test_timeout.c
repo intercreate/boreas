@@ -18,6 +18,25 @@ static void test_k_seconds(void)
     TEST_ASSERT_EQUAL(pdMS_TO_TICKS(2000), t.ticks);
 }
 
+static void test_k_minutes(void)
+{
+    k_timeout_t t = K_MINUTES(1);
+    TEST_ASSERT_EQUAL(pdMS_TO_TICKS(60000), t.ticks);
+}
+
+static void test_k_usec(void)
+{
+    /* K_USEC converts to ticks via ms — sub-ms rounds to 0 ticks */
+    k_timeout_t t = K_USEC(5000);
+    TEST_ASSERT_EQUAL(pdMS_TO_TICKS(5), t.ticks);
+}
+
+static void test_k_ticks(void)
+{
+    k_timeout_t t = K_TICKS(42);
+    TEST_ASSERT_EQUAL(42, t.ticks);
+}
+
 static void test_k_forever(void)
 {
     k_timeout_t t = K_FOREVER;
@@ -42,6 +61,9 @@ void test_timeout_group(void)
 {
     RUN_TEST(test_k_msec);
     RUN_TEST(test_k_seconds);
+    RUN_TEST(test_k_minutes);
+    RUN_TEST(test_k_usec);
+    RUN_TEST(test_k_ticks);
     RUN_TEST(test_k_forever);
     RUN_TEST(test_k_no_wait);
     RUN_TEST(test_k_no_wait_is_not_forever);

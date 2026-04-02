@@ -7,6 +7,16 @@
 #include "zephyr/kernel.h"
 
 static volatile int work_executed;
+static bool sys_wq_started = false;
+
+static void ensure_sys_work_queue(void)
+{
+    if (!sys_wq_started) {
+        k_work_queue_init(&k_sys_work_q);
+        k_work_queue_start(&k_sys_work_q, "sys_wq", 4096, 5);
+        sys_wq_started = true;
+    }
+}
 
 static void test_work_handler(struct k_work *work)
 {
@@ -16,19 +26,38 @@ static void test_work_handler(struct k_work *work)
 
 static void test_work_submit(void)
 {
-    /* Requires system work queue to be started — skip if not available */
+    ensure_sys_work_queue();
+
     struct k_work work;
     k_work_init(&work, test_work_handler);
     work_executed = 0;
 
-    int ret = k_work_submit(&work);
-    if (ret == -1) {
-        TEST_IGNORE_MESSAGE("System work queue not initialized");
-        return;
-    }
-
+    TEST_ASSERT_EQUAL(0, k_work_submit(&work));
     k_msleep(100);
     TEST_ASSERT_EQUAL(1, work_executed);
+}
+
+static void test_work_submit_idempotent(void)
+{
+    ensure_sys_work_queue();
+
+    struct k_work work;
+    k_work_init(&work, test_work_handler);
+    work_executed = 0;
+
+    TEST_ASSERT_EQUAL(0, k_work_submit(&work));
+    k_work_submit(&work);
+    k_msleep(100);
+    TEST_ASSERT_GREATER_OR_EQUAL(1, work_executed);
+}
+
+static void test_work_cancel(void)
+{
+    struct k_work work;
+    k_work_init(&work, test_work_handler);
+
+    /* Cancel on non-queued work should succeed */
+    TEST_ASSERT_TRUE(k_work_cancel(&work));
 }
 
 static void test_work_is_pending(void)
@@ -39,8 +68,107 @@ static void test_work_is_pending(void)
     TEST_ASSERT_FALSE(k_work_is_pending(&work));
 }
 
+static void test_work_delayable(void)
+{
+    ensure_sys_work_queue();
+
+    struct k_work_delayable dwork;
+    k_work_init_delayable(&dwork, test_work_handler);
+    work_executed = 0;
+
+    k_work_schedule(&dwork, K_MSEC(50));
+    TEST_ASSERT_TRUE(k_work_delayable_is_pending(&dwork));
+
+    k_msleep(10);
+    TEST_ASSERT_EQUAL(0, work_executed);
+
+    k_msleep(200);
+    TEST_ASSERT_EQUAL(1, work_executed);
+}
+
+static void test_work_cancel_delayable(void)
+{
+    ensure_sys_work_queue();
+
+    struct k_work_delayable dwork;
+    k_work_init_delayable(&dwork, test_work_handler);
+    work_executed = 0;
+
+    k_work_schedule(&dwork, K_MSEC(200));
+    k_msleep(10);
+    k_work_cancel_delayable(&dwork);
+
+    k_msleep(300);
+    TEST_ASSERT_EQUAL(0, work_executed);
+}
+
+static void test_work_reschedule(void)
+{
+    ensure_sys_work_queue();
+
+    struct k_work_delayable dwork;
+    k_work_init_delayable(&dwork, test_work_handler);
+    work_executed = 0;
+
+    /* Schedule for 500ms, then reschedule to 50ms */
+    k_work_schedule(&dwork, K_MSEC(500));
+    k_msleep(10);
+    k_work_reschedule(&dwork, K_MSEC(50));
+
+    /* Should fire at ~60ms total, not 500ms */
+    k_msleep(200);
+    TEST_ASSERT_EQUAL(1, work_executed);
+}
+
+static void test_work_delayable_remaining(void)
+{
+    ensure_sys_work_queue();
+
+    struct k_work_delayable dwork;
+    k_work_init_delayable(&dwork, test_work_handler);
+    work_executed = 0;
+
+    k_work_schedule(&dwork, K_MSEC(500));
+    k_msleep(50);
+
+    int64_t remaining = k_work_delayable_remaining_get(&dwork);
+    TEST_ASSERT_GREATER_THAN(100, remaining);
+    TEST_ASSERT_LESS_THAN(500, remaining);
+
+    k_work_cancel_delayable(&dwork);
+}
+
+static volatile int custom_wq_executed;
+
+static void custom_wq_handler(struct k_work *work)
+{
+    (void)work;
+    custom_wq_executed++;
+}
+
+static void test_work_submit_to_queue(void)
+{
+    ensure_sys_work_queue();
+
+    struct k_work work;
+    k_work_init(&work, custom_wq_handler);
+    custom_wq_executed = 0;
+
+    /* submit_to_queue with explicit queue (vs submit which uses sys queue) */
+    TEST_ASSERT_EQUAL(0, k_work_submit_to_queue(&k_sys_work_q, &work));
+    k_msleep(100);
+    TEST_ASSERT_EQUAL(1, custom_wq_executed);
+}
+
 void test_k_work_group(void)
 {
     RUN_TEST(test_work_submit);
+    RUN_TEST(test_work_submit_idempotent);
+    RUN_TEST(test_work_cancel);
     RUN_TEST(test_work_is_pending);
+    RUN_TEST(test_work_delayable);
+    RUN_TEST(test_work_cancel_delayable);
+    RUN_TEST(test_work_reschedule);
+    RUN_TEST(test_work_delayable_remaining);
+    RUN_TEST(test_work_submit_to_queue);
 }

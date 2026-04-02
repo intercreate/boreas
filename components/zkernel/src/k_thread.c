@@ -79,7 +79,7 @@ int k_thread_join(struct k_thread *thread, k_timeout_t timeout)
 
     while (thread->handle != NULL) {
         eTaskState state = eTaskGetState(thread->handle);
-        if (state == eDeleted || state == eInvalid) {
+        if (state == eDeleted || state == eInvalid || state == eSuspended) {
             thread->handle = NULL;
             return 0;
         }
