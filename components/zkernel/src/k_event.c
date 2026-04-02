@@ -32,7 +32,7 @@ uint32_t k_event_set(struct k_event *event, uint32_t events)
                                                    (EventBits_t)events,
                                                    &wake);
         if (wake) {
-            portYIELD_FROM_ISR();
+            portYIELD_FROM_ISR(wake);
         }
         return (ret == pdPASS) ? events : 0;
     }

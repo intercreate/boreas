@@ -32,7 +32,7 @@ int k_msgq_put(struct k_msgq *msgq, const void *data, k_timeout_t timeout)
         BaseType_t wake = pdFALSE;
         ret = xQueueSendToBackFromISR(msgq->handle, data, &wake);
         if (wake) {
-            portYIELD_FROM_ISR();
+            portYIELD_FROM_ISR(wake);
         }
     } else {
         ret = xQueueSendToBack(msgq->handle, data,
@@ -49,7 +49,7 @@ int k_msgq_get(struct k_msgq *msgq, void *data, k_timeout_t timeout)
         BaseType_t wake = pdFALSE;
         ret = xQueueReceiveFromISR(msgq->handle, data, &wake);
         if (wake) {
-            portYIELD_FROM_ISR();
+            portYIELD_FROM_ISR(wake);
         }
     } else {
         ret = xQueueReceive(msgq->handle, data,

@@ -195,6 +195,7 @@ uint32_t k_event_wait_all(struct k_event *event, uint32_t events,
  * Timer (over esp_timer)
  * ---------------------------------------------------------------- */
 
+struct k_timer;
 typedef void (*k_timer_expiry_t)(struct k_timer *timer);
 typedef void (*k_timer_stop_t)(struct k_timer *timer);
 
