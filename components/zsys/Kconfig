@@ -1,0 +1,44 @@
+menu "Boreas System Services (zsys)"
+
+    config ZSYS_LOG_MODULE
+        bool "Enable per-module runtime log level control"
+        default y
+        help
+            Provides LOG_MODULE_REGISTER() macro for per-module log levels
+            and a CLI-compatible API for runtime level changes.
+
+    config ZSYS_LOG_MAX_MODULES
+        int "Maximum number of log modules"
+        default 32
+        depends on ZSYS_LOG_MODULE
+        help
+            Maximum number of modules that can register via LOG_MODULE_REGISTER.
+
+    config ZSYS_THREAD_ANALYZER
+        bool "Enable thread analyzer"
+        default n
+        help
+            Runtime thread stack and CPU usage analysis.
+            Provides zsys_thread_analyzer_print() for diagnostics.
+
+    config ZSYS_WATCHDOG
+        bool "Enable subsystem watchdog"
+        default n
+        help
+            Per-subsystem watchdog with configurable timeouts.
+            A supervisor task checks that all registered subsystems
+            have fed their watchdog within the configured window.
+
+    config ZSYS_WATCHDOG_MAX_ENTRIES
+        int "Maximum watchdog entries"
+        default 8
+        depends on ZSYS_WATCHDOG
+
+    config ZSYS_RETRY
+        bool "Enable retry/backoff primitive"
+        default y
+        help
+            Provides struct retry_ctx for consistent retry logic
+            with fixed, exponential, or jitter backoff strategies.
+
+endmenu
