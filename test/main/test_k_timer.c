@@ -108,6 +108,30 @@ static void test_timer_user_data(void)
     TEST_ASSERT_EQUAL_PTR(&ctx, k_timer_user_data_get(&timer));
 }
 
+static void test_timer_first_interval(void)
+{
+    struct k_timer timer;
+    k_timer_init(&timer, test_timer_cb, NULL);
+    timer_count = 0;
+
+    /* First expiry at 100ms, then repeat every 50ms */
+    k_timer_start(&timer, K_MSEC(100), K_MSEC(50));
+
+    /* At 80ms: should not have fired yet */
+    k_msleep(80);
+    TEST_ASSERT_EQUAL(0, timer_count);
+
+    /* At 130ms: first expiry should have fired (~100ms) */
+    k_msleep(50);
+    TEST_ASSERT_EQUAL(1, timer_count);
+
+    /* At 330ms: periodic should have added ~4 more (at ~150, 200, 250, 300ms) */
+    k_msleep(200);
+    TEST_ASSERT_GREATER_OR_EQUAL(4, timer_count);
+
+    k_timer_stop(&timer);
+}
+
 void test_k_timer_group(void)
 {
     RUN_TEST(test_timer_one_shot);
@@ -116,4 +140,5 @@ void test_k_timer_group(void)
     RUN_TEST(test_timer_status_get);
     RUN_TEST(test_timer_remaining_get);
     RUN_TEST(test_timer_user_data);
+    RUN_TEST(test_timer_first_interval);
 }

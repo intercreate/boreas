@@ -12,6 +12,13 @@ static const char *TAG = "k_timer";
 static void k_timer_esp_callback(void *arg)
 {
     struct k_timer *timer = (struct k_timer *)arg;
+
+    /* First-interval transition: first expiry was start_once, now switch to periodic */
+    if (timer->first_interval_pending) {
+        timer->first_interval_pending = false;
+        esp_timer_start_periodic(timer->handle, timer->period_us);
+    }
+
     timer->status++;
     if (timer->expiry_fn) {
         timer->expiry_fn(timer);
@@ -26,6 +33,8 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn,
     timer->user_data = NULL;
     timer->status = 0;
     timer->running = false;
+    timer->first_interval_pending = false;
+    timer->period_us = 0;
     timer->handle = NULL;
 
     const esp_timer_create_args_t args = {
@@ -49,6 +58,7 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration,
     }
 
     timer->status = 0;
+    timer->first_interval_pending = false;
 
     uint64_t duration_us = (uint64_t)k_timeout_to_ticks(duration)
                            * portTICK_PERIOD_MS * 1000;
@@ -61,17 +71,27 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration,
             return;
         }
     } else {
-        /* Periodic -- duration is first expiry, period is repeat interval */
+        /* Periodic */
         uint64_t period_us = (uint64_t)k_timeout_to_ticks(period)
                              * portTICK_PERIOD_MS * 1000;
-        esp_err_t err = esp_timer_start_periodic(timer->handle, period_us);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "start_periodic failed: %s", esp_err_to_name(err));
-            return;
+
+        if (duration_us != period_us) {
+            /* Different first interval: use start_once for the first expiry,
+             * then the callback switches to periodic at period_us. */
+            timer->period_us = period_us;
+            timer->first_interval_pending = true;
+            esp_err_t err = esp_timer_start_once(timer->handle, duration_us);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "start_once failed: %s", esp_err_to_name(err));
+                return;
+            }
+        } else {
+            esp_err_t err = esp_timer_start_periodic(timer->handle, period_us);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "start_periodic failed: %s", esp_err_to_name(err));
+                return;
+            }
         }
-        /* TODO: esp_timer_start_periodic doesn't support different first
-         * interval. If duration != period, we could use start_once first
-         * then switch to periodic in the callback. */
     }
 
     timer->running = true;

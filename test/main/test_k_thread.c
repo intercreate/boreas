@@ -3,6 +3,8 @@
  * Copyright 2026 Intercreate
  */
 
+#include <stdint.h>
+
 #include "unity.h"
 #include "zephyr/kernel.h"
 
@@ -15,9 +17,11 @@
 
 static volatile int thread_ran = 0;
 
-static void thread_entry(void *p1)
+static void thread_entry(void *p1, void *p2, void *p3)
 {
     volatile int *flag = (volatile int *)p1;
+    (void)p2;
+    (void)p3;
     *flag = 42;
     vTaskSuspend(NULL); /* Suspend self -- test will abort us */
 }
@@ -25,13 +29,12 @@ static void thread_entry(void *p1)
 static void test_thread_create_and_run(void)
 {
     K_THREAD_STACK_DEFINE(stack, 4096);
-    struct k_thread thread;
+    struct k_thread thread = {0};
     thread_ran = 0;
 
-    thread.handle = xTaskCreateStatic(
-        thread_entry, "test_thr",
-        K_THREAD_STACK_SIZEOF(stack) / sizeof(StackType_t),
-        (void *)&thread_ran, 5, stack, &thread.tcb);
+    k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack),
+                    thread_entry, (void *)&thread_ran, NULL, NULL,
+                    5, 0, K_NO_WAIT);
 
     TEST_ASSERT_NOT_NULL(thread.handle);
 
@@ -44,13 +47,12 @@ static void test_thread_create_and_run(void)
 static void test_thread_stack_space(void)
 {
     K_THREAD_STACK_DEFINE(stack, 4096);
-    struct k_thread thread;
+    struct k_thread thread = {0};
     thread_ran = 0;
 
-    thread.handle = xTaskCreateStatic(
-        thread_entry, "test_stk",
-        K_THREAD_STACK_SIZEOF(stack) / sizeof(StackType_t),
-        (void *)&thread_ran, 5, stack, &thread.tcb);
+    k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack),
+                    thread_entry, (void *)&thread_ran, NULL, NULL,
+                    5, 0, K_NO_WAIT);
 
     k_msleep(100);
 
@@ -72,8 +74,9 @@ static void test_thread_name_set(void)
 
 static volatile int abort_thread_running = 0;
 
-static void long_running_entry(void *p1)
+static void long_running_entry(void *p1, void *p2, void *p3)
 {
+    (void)p1; (void)p2; (void)p3;
     abort_thread_running = 1;
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -83,13 +86,12 @@ static void long_running_entry(void *p1)
 static void test_thread_abort(void)
 {
     K_THREAD_STACK_DEFINE(stack, 4096);
-    struct k_thread thread;
+    struct k_thread thread = {0};
     abort_thread_running = 0;
 
-    thread.handle = xTaskCreateStatic(
-        long_running_entry, "abort_thr",
-        K_THREAD_STACK_SIZEOF(stack) / sizeof(StackType_t),
-        NULL, 5, stack, &thread.tcb);
+    k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack),
+                    long_running_entry, NULL, NULL, NULL,
+                    5, 0, K_NO_WAIT);
 
     k_msleep(50);
     TEST_ASSERT_EQUAL(1, abort_thread_running);
@@ -102,8 +104,9 @@ static void test_thread_abort(void)
 
 static volatile int join_flag = 0;
 
-static void short_entry(void *p1)
+static void short_entry(void *p1, void *p2, void *p3)
 {
+    (void)p1; (void)p2; (void)p3;
     k_msleep(50);
     join_flag = 1;
     vTaskSuspend(NULL); /* Signal done, suspend -- join detects suspended state */
@@ -112,18 +115,49 @@ static void short_entry(void *p1)
 static void test_thread_join(void)
 {
     K_THREAD_STACK_DEFINE(stack, 4096);
-    struct k_thread thread;
+    struct k_thread thread = {0};
     join_flag = 0;
 
-    thread.handle = xTaskCreateStatic(
-        short_entry, "join_thr",
-        K_THREAD_STACK_SIZEOF(stack) / sizeof(StackType_t),
-        NULL, 5, stack, &thread.tcb);
+    k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack),
+                    short_entry, NULL, NULL, NULL,
+                    5, 0, K_NO_WAIT);
 
     /* Join should block until thread finishes */
     int ret = k_thread_join(&thread, K_SECONDS(2));
     TEST_ASSERT_EQUAL(0, ret);
     TEST_ASSERT_EQUAL(1, join_flag);
+
+    k_thread_abort(&thread);
+}
+
+/* Test that all 3 parameters (p1, p2, p3) are passed correctly */
+static volatile int p1_val, p2_val, p3_val;
+
+static void three_arg_entry(void *p1, void *p2, void *p3)
+{
+    p1_val = (int)(intptr_t)p1;
+    p2_val = (int)(intptr_t)p2;
+    p3_val = (int)(intptr_t)p3;
+    vTaskSuspend(NULL);
+}
+
+static void test_thread_three_params(void)
+{
+    K_THREAD_STACK_DEFINE(stack, 4096);
+    struct k_thread thread = {0};
+    p1_val = p2_val = p3_val = 0;
+
+    k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack),
+                    three_arg_entry,
+                    (void *)(intptr_t)10,
+                    (void *)(intptr_t)20,
+                    (void *)(intptr_t)30,
+                    5, 0, K_NO_WAIT);
+
+    k_msleep(100);
+    TEST_ASSERT_EQUAL(10, p1_val);
+    TEST_ASSERT_EQUAL(20, p2_val);
+    TEST_ASSERT_EQUAL(30, p3_val);
 
     k_thread_abort(&thread);
 }
@@ -135,4 +169,5 @@ void test_k_thread_group(void)
     RUN_TEST(test_thread_name_set);
     RUN_TEST(test_thread_abort);
     RUN_TEST(test_thread_join);
+    RUN_TEST(test_thread_three_params);
 }
