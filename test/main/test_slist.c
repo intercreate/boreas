@@ -113,6 +113,29 @@ static void test_slist_container_iteration(void)
     TEST_ASSERT_EQUAL(60, sum);
 }
 
+static void test_slist_remove_direct(void)
+{
+    sys_slist_t list;
+    sys_slist_init(&list);
+
+    struct test_item a = {.value = 1};
+    struct test_item b = {.value = 2};
+    struct test_item c = {.value = 3};
+
+    sys_slist_append(&list, &a.node);
+    sys_slist_append(&list, &b.node);
+    sys_slist_append(&list, &c.node);
+
+    /* Remove middle node (prev=a, node=b) */
+    sys_slist_remove(&list, &a.node, &b.node);
+    TEST_ASSERT_EQUAL(2, sys_slist_len(&list));
+
+    /* Remove head (prev=NULL, node=a) */
+    sys_slist_remove(&list, NULL, &a.node);
+    TEST_ASSERT_EQUAL(1, sys_slist_len(&list));
+    TEST_ASSERT_EQUAL_PTR(&c.node, sys_slist_peek_head(&list));
+}
+
 void test_slist_group(void)
 {
     RUN_TEST(test_slist_init_empty);
@@ -121,4 +144,5 @@ void test_slist_group(void)
     RUN_TEST(test_slist_get);
     RUN_TEST(test_slist_find_and_remove);
     RUN_TEST(test_slist_container_iteration);
+    RUN_TEST(test_slist_remove_direct);
 }

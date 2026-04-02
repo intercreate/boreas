@@ -57,10 +57,43 @@ static void test_event_clear(void)
     TEST_ASSERT_EQUAL(0, got & EVT_B);
 }
 
+static void test_event_post(void)
+{
+    struct k_event evt;
+    k_event_init(&evt);
+
+    /* post is an alias for set */
+    k_event_post(&evt, EVT_A | EVT_C);
+
+    uint32_t got = k_event_wait(&evt, EVT_C, false, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(EVT_C, got & EVT_C);
+}
+
+static void test_event_wait_with_reset(void)
+{
+    struct k_event evt;
+    k_event_init(&evt);
+
+    k_event_set(&evt, EVT_A | EVT_B);
+
+    /* Wait with reset=true should clear the matched bits */
+    uint32_t got = k_event_wait(&evt, EVT_A, true, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(EVT_A, got & EVT_A);
+
+    /* EVT_A should be cleared now, EVT_B still set */
+    got = k_event_wait(&evt, EVT_A, false, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(0, got & EVT_A);
+
+    got = k_event_wait(&evt, EVT_B, false, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(EVT_B, got & EVT_B);
+}
+
 void test_k_event_group(void)
 {
     RUN_TEST(test_event_set_and_wait);
     RUN_TEST(test_event_wait_all);
     RUN_TEST(test_event_wait_all_missing);
     RUN_TEST(test_event_clear);
+    RUN_TEST(test_event_post);
+    RUN_TEST(test_event_wait_with_reset);
 }

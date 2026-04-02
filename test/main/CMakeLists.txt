@@ -13,7 +13,14 @@ set(test_srcs
 idf_build_get_property(target IDF_TARGET)
 
 if(NOT "${target}" STREQUAL "linux")
-    list(APPEND test_srcs "test_k_timer.c" "test_k_work.c")
+    # These require esp_timer (no linux impl)
+    list(APPEND test_srcs
+        "test_k_timer.c"
+        "test_k_work.c"
+        "test_uptime.c"
+        "test_sleep.c"
+        "test_k_thread.c"
+    )
 endif()
 
 idf_component_register(
