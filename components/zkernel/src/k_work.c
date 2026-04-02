@@ -14,14 +14,18 @@ static const char *TAG = "k_work";
 #define K_WORK_RUNNING BIT(1)
 
 /* Default system work queue */
-struct k_work_queue k_sys_work_q;
-static bool sys_wq_initialized = false;
+#define SYS_WQ_DEPTH 16
+#define SYS_WQ_STACK_SIZE 4096
+static uint8_t sys_wq_storage[SYS_WQ_DEPTH * sizeof(struct k_work *)];
+static StackType_t sys_wq_stack[SYS_WQ_STACK_SIZE / sizeof(StackType_t)];
 
-/* Work queue storage -- pointer-based queue items */
-#define WORK_QUEUE_DEPTH 16
-static struct k_work *sys_wq_storage[WORK_QUEUE_DEPTH];
-static StackType_t sys_wq_stack[4096 / sizeof(StackType_t)];
-static StaticTask_t sys_wq_tcb;
+struct k_work_queue k_sys_work_q = {
+    .storage = sys_wq_storage,
+    .stack = sys_wq_stack,
+    .depth = SYS_WQ_DEPTH,
+    .stack_size = SYS_WQ_STACK_SIZE,
+};
+static bool sys_wq_initialized = false;
 
 /* ----------------------------------------------------------------
  * Work Queue Thread
@@ -34,7 +38,9 @@ static void k_work_queue_thread(void *p1)
 
     for (;;) {
         if (xQueueReceive(queue->queue, &work, portMAX_DELAY) == pdTRUE) {
-            if (work && work->handler) {
+            /* A cancelled item may still be in the queue (QUEUED flag cleared
+             * but not removable from FreeRTOS queue). Skip it silently. */
+            if (work && work->handler && (work->flags & K_WORK_QUEUED)) {
                 work->flags |= K_WORK_RUNNING;
                 work->flags &= ~K_WORK_QUEUED;
                 work->handler(work);
@@ -122,24 +128,27 @@ void k_work_queue_init(struct k_work_queue *queue)
     queue->queue = NULL;
     queue->thread = NULL;
     queue->name = NULL;
+    /* storage, stack, depth, stack_size, tcb are set by K_WORK_QUEUE_DEFINE
+     * or by the caller before k_work_queue_start */
 }
 
 void k_work_queue_start(struct k_work_queue *queue, const char *name,
                         uint32_t stack_size, int prio)
 {
-    /* Create queue for work item pointers */
-    queue->queue = xQueueCreateStatic(WORK_QUEUE_DEPTH,
-                                      sizeof(struct k_work *),
-                                      (uint8_t *)sys_wq_storage,
-                                      &queue->queue_buffer);
     queue->name = name;
 
-    /* Create worker thread */
+    /* Create queue for work item pointers */
+    queue->queue = xQueueCreateStatic(queue->depth,
+                                      sizeof(struct k_work *),
+                                      queue->storage,
+                                      &queue->queue_buffer);
+
+    /* Create worker thread using the queue's own stack and TCB */
     queue->thread = xTaskCreateStatic(k_work_queue_thread,
                                       name,
                                       stack_size / sizeof(StackType_t),
-                                      queue, prio, sys_wq_stack,
-                                      &sys_wq_tcb);
+                                      queue, prio, queue->stack,
+                                      &queue->tcb);
 
     if (queue == &k_sys_work_q) {
         sys_wq_initialized = true;

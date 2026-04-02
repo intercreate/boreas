@@ -9,24 +9,14 @@
 
 static const char *TAG = "k_thread";
 
-/* Wrapper to adapt Zephyr's 3-arg entry to FreeRTOS's 1-arg entry */
-struct thread_args {
-    k_thread_entry_t entry;
-    void *p1;
-    void *p2;
-    void *p3;
-};
-
+/* Trampoline: adapts Zephyr's 3-arg entry to FreeRTOS's 1-arg entry.
+ * After the entry function returns, the thread suspends itself
+ * (safe for static tasks -- vTaskDelete is NOT safe with static TCBs). */
 static void k_thread_entry_wrapper(void *arg)
 {
     struct k_thread *thread = (struct k_thread *)arg;
-    /* Arguments are stashed after the TCB -- we use a simple convention:
-     * p1 is passed via FreeRTOS task arg, p2 and p3 are NULL for now.
-     * Full 3-arg support requires storing args in the k_thread struct. */
-    (void)thread;
-    /* This is a simplified wrapper -- full implementation will store
-     * entry + args in k_thread struct */
-    vTaskDelete(NULL);
+    thread->entry(thread->p1, thread->p2, thread->p3);
+    vTaskSuspend(NULL);
 }
 
 void k_thread_create(struct k_thread *thread, StackType_t *stack,
@@ -36,17 +26,19 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack,
 {
     (void)options;
     (void)delay; /* TODO: deferred start via k_timer */
-    (void)p2;
-    (void)p3;
 
     thread->stack = stack;
     thread->stack_size = stack_size;
+    thread->entry = entry;
+    thread->p1 = p1;
+    thread->p2 = p2;
+    thread->p3 = p3;
 
     thread->handle = xTaskCreateStatic(
-        (TaskFunction_t)entry,
-        "k_thread",
+        k_thread_entry_wrapper,
+        thread->name ? thread->name : "k_thread",
         stack_size / sizeof(StackType_t),
-        p1,
+        thread,
         prio,
         stack,
         &thread->tcb);

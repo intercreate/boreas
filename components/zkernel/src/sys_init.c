@@ -9,15 +9,15 @@
 
 static const char *TAG = "sys_init";
 
-/* Linker-defined section boundaries */
-extern const struct sys_init_entry __start_sys_init[];
-extern const struct sys_init_entry __stop_sys_init[];
+/* Global registry -- populated by constructors before main() */
+struct sys_init_entry *_sys_init_entries[CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES];
+size_t _sys_init_count = 0;
 
 /* Simple insertion sort by (level, priority) -- runs once at boot */
-static void sort_entries(const struct sys_init_entry **sorted, size_t count)
+static void sort_entries(struct sys_init_entry **sorted, size_t count)
 {
     for (size_t i = 1; i < count; i++) {
-        const struct sys_init_entry *key = sorted[i];
+        struct sys_init_entry *key = sorted[i];
         int j = (int)i - 1;
         while (j >= 0 &&
                (sorted[j]->level > key->level ||
@@ -32,33 +32,27 @@ static void sort_entries(const struct sys_init_entry **sorted, size_t count)
 
 int sys_init_run_all(void)
 {
-    const struct sys_init_entry *start = __start_sys_init;
-    const struct sys_init_entry *stop = __stop_sys_init;
-    size_t count = (size_t)(stop - start);
+    size_t count = _sys_init_count;
 
     if (count == 0) {
         ESP_LOGI(TAG, "No SYS_INIT entries registered");
         return 0;
     }
 
-    ESP_LOGI(TAG, "Running %u init entries", (unsigned)count);
-
-    /* Build sorted pointer array */
-    const struct sys_init_entry *sorted[CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES];
     if (count > CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES) {
         ESP_LOGE(TAG, "Too many init entries (%u > %d)",
                  (unsigned)count, CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES);
         count = CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES;
     }
 
-    for (size_t i = 0; i < count; i++) {
-        sorted[i] = &start[i];
-    }
-    sort_entries(sorted, count);
+    ESP_LOGI(TAG, "Running %u init entries", (unsigned)count);
+
+    /* Sort in place -- constructors register in arbitrary order */
+    sort_entries(_sys_init_entries, count);
 
     /* Run in order */
     for (size_t i = 0; i < count; i++) {
-        const struct sys_init_entry *entry = sorted[i];
+        struct sys_init_entry *entry = _sys_init_entries[i];
         ESP_LOGI(TAG, "[%d/%d] %s (level=%d, prio=%d)",
                  (int)(i + 1), (int)count, entry->name,
                  entry->level, entry->priority);
@@ -67,8 +61,7 @@ int sys_init_run_all(void)
             ESP_LOGE(TAG, "Init failed: %s returned %d", entry->name, ret);
             return ret;
         }
-        /* Cast away const -- initialized flag is runtime state */
-        ((struct sys_init_entry *)entry)->initialized = true;
+        entry->initialized = true;
     }
 
     ESP_LOGI(TAG, "All init entries completed successfully");
@@ -77,32 +70,24 @@ int sys_init_run_all(void)
 
 void sys_shutdown_run_all(void)
 {
-    const struct sys_init_entry *start = __start_sys_init;
-    const struct sys_init_entry *stop = __stop_sys_init;
-    size_t count = (size_t)(stop - start);
+    size_t count = _sys_init_count;
 
     if (count == 0) {
         return;
     }
 
-    /* Build sorted pointer array (same as init) */
-    const struct sys_init_entry *sorted[CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES];
     if (count > CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES) {
         count = CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES;
     }
-    for (size_t i = 0; i < count; i++) {
-        sorted[i] = &start[i];
-    }
-    sort_entries(sorted, count);
 
-    /* Run shutdown in reverse order */
+    /* Entries were already sorted by sys_init_run_all -- run shutdown in reverse */
     ESP_LOGI(TAG, "Running shutdown (%u entries)", (unsigned)count);
     for (int i = (int)count - 1; i >= 0; i--) {
-        const struct sys_init_entry *entry = sorted[i];
+        struct sys_init_entry *entry = _sys_init_entries[i];
         if (entry->shutdown_fn && entry->initialized) {
             ESP_LOGI(TAG, "Shutdown: %s", entry->name);
             entry->shutdown_fn();
-            ((struct sys_init_entry *)entry)->initialized = false;
+            entry->initialized = false;
         }
     }
 }

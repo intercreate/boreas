@@ -206,6 +206,8 @@ struct k_timer {
     void              *user_data;
     uint32_t           status;     /* expiry count since last status read */
     bool               running;
+    bool               first_interval_pending; /* start-once then switch to periodic */
+    uint64_t           period_us;              /* stored for deferred periodic start */
 };
 
 #define K_TIMER_DEFINE(name, _expiry_fn, _stop_fn) \
@@ -242,6 +244,11 @@ struct k_work_queue {
     QueueHandle_t  queue;
     StaticQueue_t  queue_buffer;
     TaskHandle_t   thread;
+    StaticTask_t   tcb;
+    StackType_t   *stack;
+    uint8_t       *storage;
+    uint32_t       depth;
+    uint32_t       stack_size;
     const char    *name;
 };
 
@@ -250,9 +257,39 @@ struct k_work_queue {
         .handler = (_handler), \
     }
 
+/**
+ * Statically define a work queue with its own storage.
+ *
+ * @param _name  Variable name for the work queue.
+ * @param _depth Maximum number of pending work items.
+ * @param _stack_size Stack size in bytes for the worker thread.
+ */
+#define K_WORK_QUEUE_DEFINE(_name, _depth, _stack_size) \
+    static uint8_t _k_wq_storage_##_name[(_depth) * sizeof(struct k_work *)]; \
+    static StackType_t _k_wq_stack_##_name[(_stack_size) / sizeof(StackType_t)]; \
+    struct k_work_queue _name = { \
+        .storage = _k_wq_storage_##_name, \
+        .stack = _k_wq_stack_##_name, \
+        .depth = (_depth), \
+        .stack_size = (_stack_size), \
+    }
+
 void k_work_init(struct k_work *work, k_work_handler_t handler);
 int  k_work_submit(struct k_work *work);
 int  k_work_submit_to_queue(struct k_work_queue *queue, struct k_work *work);
+
+/**
+ * Cancel a pending work item.
+ *
+ * Clears the QUEUED flag so the handler will not run. However, the item
+ * cannot be removed from the underlying FreeRTOS queue -- it will be
+ * dequeued and silently discarded by the worker thread. This means a
+ * cancelled item still occupies a queue slot until it is drained.
+ *
+ * Cannot cancel a work item that is currently running.
+ *
+ * @return true if cancelled, false if the item is currently running.
+ */
 bool k_work_cancel(struct k_work *work);
 bool k_work_is_pending(struct k_work *work);
 
@@ -295,11 +332,15 @@ int64_t k_work_delayable_remaining_get(struct k_work_delayable *dwork);
 typedef void (*k_thread_entry_t)(void *p1, void *p2, void *p3);
 
 struct k_thread {
-    TaskHandle_t  handle;
-    StaticTask_t  tcb;
-    StackType_t  *stack;
-    uint32_t      stack_size;
-    const char   *name;
+    TaskHandle_t      handle;
+    StaticTask_t      tcb;
+    StackType_t      *stack;
+    uint32_t          stack_size;
+    const char       *name;
+    k_thread_entry_t  entry;
+    void             *p1;
+    void             *p2;
+    void             *p3;
 };
 
 /* Priority helpers -- map to FreeRTOS priority scheme */
