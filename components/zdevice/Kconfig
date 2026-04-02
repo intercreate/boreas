@@ -1,0 +1,24 @@
+menu "Boreas Device Model (zdevice)"
+
+    config DEVICE_MODEL_I2C
+        bool "Enable I2C bus driver"
+        default n
+        help
+            Enable the I2C bus device implementation.
+            Wraps ESP-IDF i2c_master with Zephyr-style i2c_dt_spec.
+
+    config DEVICE_MODEL_SPI
+        bool "Enable SPI bus driver"
+        default n
+        help
+            Enable the SPI bus device implementation.
+            Wraps ESP-IDF spi_master with Zephyr-style spi_dt_spec.
+
+    config DEVICE_MODEL_GPIO
+        bool "Enable GPIO controller driver"
+        default n
+        help
+            Enable the GPIO controller device implementation.
+            Wraps ESP-IDF GPIO with Zephyr-style gpio_dt_spec and gpio_api vtable.
+
+endmenu

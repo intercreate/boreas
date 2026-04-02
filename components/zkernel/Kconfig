@@ -1,0 +1,47 @@
+menu "Boreas Kernel (zkernel)"
+
+    config ZKERNEL_MUTEX_DEBUG
+        bool "Enable mutex lock-ordering assertions"
+        default n
+        help
+            When enabled, each mutex is assigned a numeric lock order.
+            Acquiring mutexes out of order triggers an assertion failure.
+            Adds ~4 bytes per mutex and a small runtime check on lock.
+
+    config ZKERNEL_MUTEX_HOLD_WARNING_MS
+        int "Mutex hold-time warning threshold (ms)"
+        default 0
+        depends on ZKERNEL_MUTEX_DEBUG
+        help
+            Log a warning if a mutex is held longer than this many
+            milliseconds. Set to 0 to disable hold-time warnings.
+
+    config ZKERNEL_THREAD_ANALYZER
+        bool "Enable thread analyzer"
+        default n
+        help
+            Enables runtime thread stack and CPU usage analysis.
+            Adds a CLI command and periodic reporting capability.
+
+    config ZKERNEL_SYS_INIT
+        bool "Enable SYS_INIT ordered initialization framework"
+        default y
+        help
+            Enables the SYS_INIT macro for declarative, priority-ordered
+            component initialization and shutdown.
+
+    config ZKERNEL_SYS_INIT_MAX_ENTRIES
+        int "Maximum number of SYS_INIT entries"
+        default 32
+        depends on ZKERNEL_SYS_INIT
+        help
+            Maximum number of components that can register via SYS_INIT.
+
+    config ZKERNEL_FATAL_CAPTURE
+        bool "Capture fatal error context to NVS"
+        default n
+        help
+            On fatal error or assertion failure, save task name, backtrace,
+            and heap state to NVS. Printed on next boot.
+
+endmenu
