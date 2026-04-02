@@ -122,7 +122,7 @@ struct k_mutex {
     SemaphoreHandle_t handle;
     StaticSemaphore_t buffer;
 #if defined(CONFIG_ZKERNEL_MUTEX_DEBUG)
-    uint8_t  order;     /* lock ordering — lower must be acquired first */
+    uint8_t  order;     /* lock ordering -- lower must be acquired first */
     uint32_t lock_time; /* tick count at lock acquisition */
 #endif
 };
@@ -260,7 +260,7 @@ void k_work_queue_init(struct k_work_queue *queue);
 void k_work_queue_start(struct k_work_queue *queue, const char *name,
                         uint32_t stack_size, int prio);
 
-/* System work queue — initialized at boot */
+/* System work queue -- initialized at boot */
 extern struct k_work_queue k_sys_work_q;
 
 /* ----------------------------------------------------------------
@@ -302,7 +302,7 @@ struct k_thread {
     const char   *name;
 };
 
-/* Priority helpers — map to FreeRTOS priority scheme */
+/* Priority helpers -- map to FreeRTOS priority scheme */
 #define K_PRIO_PREEMPT(p) (configMAX_PRIORITIES - 1 - (p))
 #define K_PRIO_COOP(p)    (configMAX_PRIORITIES - 1 - (p))
 

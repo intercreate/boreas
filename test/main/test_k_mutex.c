@@ -19,7 +19,7 @@ static void test_mutex_reentrant(void)
     struct k_mutex mutex;
     k_mutex_init(&mutex);
 
-    /* Zephyr k_mutex is reentrant — same thread can lock multiple times */
+    /* Zephyr k_mutex is reentrant -- same thread can lock multiple times */
     TEST_ASSERT_EQUAL(0, k_mutex_lock(&mutex, K_NO_WAIT));
     TEST_ASSERT_EQUAL(0, k_mutex_lock(&mutex, K_NO_WAIT));
     TEST_ASSERT_EQUAL(0, k_mutex_lock(&mutex, K_NO_WAIT));
@@ -29,7 +29,7 @@ static void test_mutex_reentrant(void)
     TEST_ASSERT_EQUAL(0, k_mutex_unlock(&mutex));
     TEST_ASSERT_EQUAL(0, k_mutex_unlock(&mutex));
 
-    /* Now fully released — can lock again */
+    /* Now fully released -- can lock again */
     TEST_ASSERT_EQUAL(0, k_mutex_lock(&mutex, K_NO_WAIT));
     TEST_ASSERT_EQUAL(0, k_mutex_unlock(&mutex));
 }

@@ -28,7 +28,7 @@ static void test_event_wait_all(void)
 
     k_event_set(&evt, EVT_A | EVT_B);
 
-    /* Should succeed — both bits set */
+    /* Should succeed -- both bits set */
     uint32_t got = k_event_wait_all(&evt, EVT_A | EVT_B, false, K_NO_WAIT);
     TEST_ASSERT_EQUAL(EVT_A | EVT_B, got);
 }
@@ -40,7 +40,7 @@ static void test_event_wait_all_missing(void)
 
     k_event_set(&evt, EVT_A); /* Only A, not B */
 
-    /* Should timeout — waiting for both A and B */
+    /* Should timeout -- waiting for both A and B */
     uint32_t got = k_event_wait_all(&evt, EVT_A | EVT_B, false, K_NO_WAIT);
     TEST_ASSERT_NOT_EQUAL(EVT_A | EVT_B, got);
 }

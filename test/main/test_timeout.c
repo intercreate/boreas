@@ -26,7 +26,7 @@ static void test_k_minutes(void)
 
 static void test_k_usec(void)
 {
-    /* K_USEC converts to ticks via ms — sub-ms rounds to 0 ticks */
+    /* K_USEC converts to ticks via ms -- sub-ms rounds to 0 ticks */
     k_timeout_t t = K_USEC(5000);
     TEST_ASSERT_EQUAL(pdMS_TO_TICKS(5), t.ticks);
 }

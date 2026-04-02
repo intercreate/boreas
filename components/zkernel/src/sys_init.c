@@ -13,7 +13,7 @@ static const char *TAG = "sys_init";
 extern const struct sys_init_entry __start_sys_init[];
 extern const struct sys_init_entry __stop_sys_init[];
 
-/* Simple insertion sort by (level, priority) — runs once at boot */
+/* Simple insertion sort by (level, priority) -- runs once at boot */
 static void sort_entries(const struct sys_init_entry **sorted, size_t count)
 {
     for (size_t i = 1; i < count; i++) {
@@ -67,7 +67,7 @@ int sys_init_run_all(void)
             ESP_LOGE(TAG, "Init failed: %s returned %d", entry->name, ret);
             return ret;
         }
-        /* Cast away const — initialized flag is runtime state */
+        /* Cast away const -- initialized flag is runtime state */
         ((struct sys_init_entry *)entry)->initialized = true;
     }
 

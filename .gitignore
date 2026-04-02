@@ -5,6 +5,9 @@ sdkconfig.old
 *.pyc
 __pycache__/
 
+# Environment (local paths)
+.env
+
 # IDE
 .vscode/
 .idea/
@@ -13,6 +16,9 @@ __pycache__/
 *~
 .cache/
 compile_commands.json
+
+# Claude Code
+.claude/
 
 # OS
 .DS_Store

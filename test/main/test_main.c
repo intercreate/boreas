@@ -7,7 +7,7 @@
 
 #include "unity.h"
 
-/* Test group declarations — always available */
+/* Test group declarations -- always available */
 void test_timeout_group(void);
 void test_slist_group(void);
 void test_dlist_group(void);
@@ -17,7 +17,7 @@ void test_k_msgq_group(void);
 void test_k_event_group(void);
 void test_retry_group(void);
 
-/* These require esp_timer / real HW — not available on linux target */
+/* These require esp_timer / real HW -- not available on linux target */
 #if !CONFIG_IDF_TARGET_LINUX
 void test_uptime_group(void);
 void test_sleep_group(void);

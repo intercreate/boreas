@@ -39,7 +39,7 @@ static void test_sleep_no_wait(void)
 
 static void test_yield(void)
 {
-    /* k_yield should not crash or hang — just context switch */
+    /* k_yield should not crash or hang -- just context switch */
     int64_t before = k_uptime_get();
     k_yield();
     int64_t elapsed = k_uptime_get() - before;

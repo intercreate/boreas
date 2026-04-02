@@ -9,12 +9,12 @@
  *   SYS_INIT(my_subsystem_init, DEVICE, 10);
  *
  * Init levels (executed in order):
- *   EARLY       — logging, NVS, hardware ID
- *   STORAGE     — cert manager, persistent config
- *   DEVICE      — buses, peripherals (board_init)
- *   AUDIO       — mixer, codec, tone player
- *   NETWORK     — WiFi, MQTT, SIP
- *   APPLICATION — state machine, CLI, diagnostics
+ *   EARLY       -- logging, NVS, hardware ID
+ *   STORAGE     -- cert manager, persistent config
+ *   DEVICE      -- buses, peripherals (board_init)
+ *   AUDIO       -- mixer, codec, tone player
+ *   NETWORK     -- WiFi, MQTT, SIP
+ *   APPLICATION -- state machine, CLI, diagnostics
  *
  * Within a level, entries are sorted by priority (lower = earlier).
  * Shutdown runs in reverse order.

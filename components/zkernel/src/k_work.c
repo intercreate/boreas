@@ -17,7 +17,7 @@ static const char *TAG = "k_work";
 struct k_work_queue k_sys_work_q;
 static bool sys_wq_initialized = false;
 
-/* Work queue storage — pointer-based queue items */
+/* Work queue storage -- pointer-based queue items */
 #define WORK_QUEUE_DEPTH 16
 static struct k_work *sys_wq_storage[WORK_QUEUE_DEPTH];
 static StackType_t sys_wq_stack[4096 / sizeof(StackType_t)];
@@ -60,7 +60,7 @@ static int k_work_submit_internal(struct k_work_queue *queue,
                                   struct k_work *work)
 {
     if (work->flags & K_WORK_QUEUED) {
-        /* Already queued — idempotent */
+        /* Already queued -- idempotent */
         return 1;
     }
 

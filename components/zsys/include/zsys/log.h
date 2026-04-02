@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-/* Log levels — alias Zephyr names to ESP-IDF levels */
+/* Log levels -- alias Zephyr names to ESP-IDF levels */
 #define LOG_LEVEL_NONE ESP_LOG_NONE
 #define LOG_LEVEL_ERR  ESP_LOG_ERROR
 #define LOG_LEVEL_WRN  ESP_LOG_WARN

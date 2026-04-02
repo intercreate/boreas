@@ -11,7 +11,7 @@ static const char *TAG = "k_mutex";
 
 int k_mutex_init(struct k_mutex *mutex)
 {
-    /* Zephyr k_mutex is reentrant — same thread can re-lock */
+    /* Zephyr k_mutex is reentrant -- same thread can re-lock */
     mutex->handle = xSemaphoreCreateRecursiveMutexStatic(&mutex->buffer);
     if (mutex->handle == NULL) {
         ESP_LOGE(TAG, "Failed to create mutex");

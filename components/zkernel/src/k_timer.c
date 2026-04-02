@@ -61,7 +61,7 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration,
             return;
         }
     } else {
-        /* Periodic — duration is first expiry, period is repeat interval */
+        /* Periodic -- duration is first expiry, period is repeat interval */
         uint64_t period_us = (uint64_t)k_timeout_to_ticks(period)
                              * portTICK_PERIOD_MS * 1000;
         esp_err_t err = esp_timer_start_periodic(timer->handle, period_us);

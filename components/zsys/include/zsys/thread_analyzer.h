@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Intercreate
  *
- * Thread analyzer — runtime stack and CPU usage reporting.
+ * Thread analyzer -- runtime stack and CPU usage reporting.
  */
 
 #pragma once
