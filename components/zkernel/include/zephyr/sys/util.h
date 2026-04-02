@@ -102,7 +102,7 @@ extern "C" {
 #define ALWAYS_INLINE __attribute__((always_inline)) inline
 #endif
 
-/* Runtime assertion — logs and aborts (matches the original project's utils.h convention) */
+/* Runtime assertion — logs and aborts */
 #ifndef __ASSERT
 #include "esp_log.h"
 #define __ASSERT(cond, msg) \

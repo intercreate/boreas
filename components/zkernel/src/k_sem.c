@@ -34,7 +34,7 @@ void k_sem_give(struct k_sem *sem)
         BaseType_t wake = pdFALSE;
         xSemaphoreGiveFromISR(sem->handle, &wake);
         if (wake) {
-            portYIELD_FROM_ISR();
+            portYIELD_FROM_ISR(wake);
         }
     } else {
         xSemaphoreGive(sem->handle);

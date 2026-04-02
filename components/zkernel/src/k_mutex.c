@@ -11,7 +11,8 @@ static const char *TAG = "k_mutex";
 
 int k_mutex_init(struct k_mutex *mutex)
 {
-    mutex->handle = xSemaphoreCreateMutexStatic(&mutex->buffer);
+    /* Zephyr k_mutex is reentrant — same thread can re-lock */
+    mutex->handle = xSemaphoreCreateRecursiveMutexStatic(&mutex->buffer);
     if (mutex->handle == NULL) {
         ESP_LOGE(TAG, "Failed to create mutex");
         return -1;
@@ -36,8 +37,8 @@ int k_mutex_init_ordered(struct k_mutex *mutex, uint8_t order)
 
 int k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
 {
-    BaseType_t ret = xSemaphoreTake(mutex->handle,
-                                    k_timeout_to_ticks(timeout));
+    BaseType_t ret = xSemaphoreTakeRecursive(mutex->handle,
+                                             k_timeout_to_ticks(timeout));
     if (ret != pdTRUE) {
         return -1;
     }
@@ -61,6 +62,6 @@ int k_mutex_unlock(struct k_mutex *mutex)
 #endif
 #endif
 
-    BaseType_t ret = xSemaphoreGive(mutex->handle);
+    BaseType_t ret = xSemaphoreGiveRecursive(mutex->handle);
     return (ret == pdTRUE) ? 0 : -1;
 }

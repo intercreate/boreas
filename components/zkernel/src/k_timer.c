@@ -109,7 +109,11 @@ int64_t k_timer_remaining_get(struct k_timer *timer)
     if (!timer->running || timer->handle == NULL) {
         return 0;
     }
-    uint64_t expiry = esp_timer_get_expiry_time(timer->handle);
+    uint64_t expiry = 0;
+    esp_err_t err = esp_timer_get_expiry_time(timer->handle, &expiry);
+    if (err != ESP_OK) {
+        return 0;
+    }
     int64_t now = esp_timer_get_time();
     int64_t remaining_us = (int64_t)expiry - now;
     return (remaining_us > 0) ? (remaining_us / 1000) : 0;

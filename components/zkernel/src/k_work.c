@@ -21,18 +21,16 @@ static bool sys_wq_initialized = false;
 #define WORK_QUEUE_DEPTH 16
 static struct k_work *sys_wq_storage[WORK_QUEUE_DEPTH];
 static StackType_t sys_wq_stack[4096 / sizeof(StackType_t)];
+static StaticTask_t sys_wq_tcb;
 
 /* ----------------------------------------------------------------
  * Work Queue Thread
  * ---------------------------------------------------------------- */
 
-static void k_work_queue_thread(void *p1, void *p2, void *p3)
+static void k_work_queue_thread(void *p1)
 {
     struct k_work_queue *queue = (struct k_work_queue *)p1;
     struct k_work *work;
-
-    (void)p2;
-    (void)p3;
 
     for (;;) {
         if (xQueueReceive(queue->queue, &work, portMAX_DELAY) == pdTRUE) {
@@ -73,7 +71,7 @@ static int k_work_submit_internal(struct k_work_queue *queue,
         BaseType_t wake = pdFALSE;
         ret = xQueueSendToBackFromISR(queue->queue, &work, &wake);
         if (wake) {
-            portYIELD_FROM_ISR();
+            portYIELD_FROM_ISR(wake);
         }
     } else {
         ret = xQueueSendToBack(queue->queue, &work, pdMS_TO_TICKS(20));
@@ -141,7 +139,7 @@ void k_work_queue_start(struct k_work_queue *queue, const char *name,
                                       name,
                                       stack_size / sizeof(StackType_t),
                                       queue, prio, sys_wq_stack,
-                                      NULL); /* TODO: need static TCB */
+                                      &sys_wq_tcb);
 
     if (queue == &k_sys_work_q) {
         sys_wq_initialized = true;

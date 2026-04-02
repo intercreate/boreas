@@ -61,3 +61,4 @@ Apache 2.0. Copyright 2026 Intercreate.
 ## Attribution
 
 Kernel API surface derived from [Zephyr RTOS](https://github.com/zephyrproject-rtos/zephyr) (Apache 2.0).
+Device model developed for ESP32-S3 embedded firmware.
