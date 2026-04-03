@@ -17,9 +17,12 @@ menu "Boreas System Services (zsys)"
     config ZSYS_THREAD_ANALYZER
         bool "Enable thread analyzer"
         default n
+        select FREERTOS_USE_TRACE_FACILITY
+        select FREERTOS_GENERATE_RUN_TIME_STATS
         help
             Runtime thread stack and CPU usage analysis.
             Provides zsys_thread_analyzer_print() for diagnostics.
+            Automatically enables FreeRTOS trace facility and runtime stats.
 
     config ZSYS_WATCHDOG
         bool "Enable subsystem watchdog"

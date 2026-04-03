@@ -1,0 +1,103 @@
+menu "Boreas Shell (zshell)"
+
+    config ZSHELL
+        bool "Enable shell subsystem"
+        default n
+        help
+            Enable the Zephyr-style interactive shell.
+
+    config ZSHELL_CMD_BUFF_SIZE
+        int "Command buffer size"
+        default 128
+        depends on ZSHELL
+
+    config ZSHELL_PRINTF_BUFF_SIZE
+        int "Printf buffer size"
+        default 256
+        depends on ZSHELL
+
+    config ZSHELL_MAX_ROOT_CMDS
+        int "Maximum number of root commands"
+        default 32
+        depends on ZSHELL
+
+    config ZSHELL_MAX_ARGC
+        int "Maximum number of command arguments"
+        default 12
+        depends on ZSHELL
+
+    config ZSHELL_THREAD_STACK_SIZE
+        int "Shell thread stack size (bytes)"
+        default 4096
+        depends on ZSHELL
+
+    config ZSHELL_THREAD_PRIORITY
+        int "Shell thread priority"
+        default 5
+        depends on ZSHELL
+
+    config ZSHELL_PROMPT
+        string "Default prompt string"
+        default "boreas> "
+        depends on ZSHELL
+
+    config ZSHELL_HISTORY
+        bool "Enable command history"
+        default y
+        depends on ZSHELL
+
+    config ZSHELL_HISTORY_DEPTH
+        int "Number of history entries"
+        default 10
+        depends on ZSHELL_HISTORY
+
+    config ZSHELL_VT100
+        bool "Enable VT100 escape sequence handling"
+        default y
+        depends on ZSHELL
+        help
+            Enable cursor movement, arrow keys, Home/End/Delete.
+
+    config ZSHELL_TAB_COMPLETION
+        bool "Enable tab completion"
+        default y
+        depends on ZSHELL
+
+    config ZSHELL_ECHO
+        bool "Enable character echo by default"
+        default y
+        depends on ZSHELL
+
+    config ZSHELL_CMD_KERNEL
+        bool "Enable built-in kernel commands (uptime, heap)"
+        default y
+        depends on ZSHELL
+
+    config ZSHELL_CMD_LOG
+        bool "Enable built-in log commands"
+        default y
+        depends on ZSHELL
+        select ZSYS_LOG_MODULE
+
+    config ZSHELL_CMD_THREAD
+        bool "Enable built-in thread analyzer command"
+        default y
+        depends on ZSHELL
+        select ZSYS_THREAD_ANALYZER
+
+    config ZSHELL_UART_PORT
+        int "UART port number for shell"
+        default 0
+        depends on ZSHELL
+
+    config ZSHELL_UART_BAUD
+        int "UART baud rate"
+        default 115200
+        depends on ZSHELL
+
+    config ZSHELL_UART_RX_BUF_SIZE
+        int "UART RX ring buffer size"
+        default 256
+        depends on ZSHELL
+
+endmenu
