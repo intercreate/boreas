@@ -19,6 +19,10 @@ extern "C" {
 /* Forward declaration */
 struct shell;
 
+/* Forward declarations */
+struct shell_static_entry;
+union shell_cmd_entry;
+
 /* Command handler -- matches Zephyr signature */
 typedef int (*shell_cmd_handler)(const struct shell *sh,
                                  size_t argc, char **argv);
@@ -26,9 +30,6 @@ typedef int (*shell_cmd_handler)(const struct shell *sh,
 /* Dynamic command getter -- for runtime-generated commands */
 typedef void (*shell_dynamic_get)(size_t idx,
                                   struct shell_static_entry *entry);
-
-/* Forward declare union */
-union shell_cmd_entry;
 
 /* Static command entry -- one node in the command tree */
 struct shell_static_entry {

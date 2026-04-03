@@ -5,8 +5,9 @@ if("${IDF_TARGET}" STREQUAL "linux")
     set(EXTRA_COMPONENT_DIRS
         "../components/zkernel"
         "../components/zsys"
+        "../components/zshell"
     )
-    set(COMPONENTS main zkernel zsys)
+    set(COMPONENTS main zkernel zsys zshell)
 else()
     set(EXTRA_COMPONENT_DIRS "../components")
 endif()

@@ -17,6 +17,11 @@ void test_k_msgq_group(void);
 void test_k_event_group(void);
 void test_retry_group(void);
 
+/* Shell tests -- available on all targets when ZSHELL is enabled */
+#if defined(CONFIG_ZSHELL)
+void test_shell_group(void);
+#endif
+
 /* These require esp_timer / real HW -- not available on linux target */
 #if !CONFIG_IDF_TARGET_LINUX
 void test_uptime_group(void);
@@ -43,6 +48,11 @@ void app_main(void)
 
     /* System services */
     test_retry_group();
+
+#if defined(CONFIG_ZSHELL)
+    /* Shell */
+    test_shell_group();
+#endif
 
 #if !CONFIG_IDF_TARGET_LINUX
     /* Layer 0: Uptime & Sleep (need esp_timer) */

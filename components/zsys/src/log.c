@@ -79,6 +79,21 @@ void zsys_log_list_modules(void)
     }
 }
 
+int zsys_log_get_module_count(void)
+{
+    return module_count;
+}
+
+int zsys_log_get_module_info(int index, const char **name, int *level)
+{
+    if (index < 0 || index >= module_count) {
+        return -1;
+    }
+    *name = modules[index].name;
+    *level = (int)modules[index].current_level;
+    return 0;
+}
+
 #else /* !CONFIG_ZSYS_LOG_MODULE */
 
 void zsys_log_register_module(const char *name, esp_log_level_t default_level)
@@ -95,6 +110,17 @@ int zsys_log_set_level(const char *module_name, esp_log_level_t level)
 
 void zsys_log_list_modules(void)
 {
+}
+
+int zsys_log_get_module_count(void)
+{
+    return 0;
+}
+
+int zsys_log_get_module_info(int index, const char **name, int *level)
+{
+    (void)index; (void)name; (void)level;
+    return -1;
 }
 
 #endif

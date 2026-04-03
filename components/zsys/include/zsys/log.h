@@ -62,9 +62,20 @@ void zsys_log_register_module(const char *name, esp_log_level_t default_level);
 int zsys_log_set_level(const char *module_name, esp_log_level_t level);
 
 /**
- * Print all registered modules and their current levels.
+ * Print all registered modules and their current levels (via ESP_LOG).
  */
 void zsys_log_list_modules(void);
+
+/**
+ * Get the number of registered modules.
+ */
+int zsys_log_get_module_count(void);
+
+/**
+ * Get module info by index.
+ * Returns 0 on success, -1 if index out of range.
+ */
+int zsys_log_get_module_info(int index, const char **name, int *level);
 
 #ifdef __cplusplus
 }
