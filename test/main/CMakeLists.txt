@@ -23,8 +23,12 @@ if(NOT "${target}" STREQUAL "linux")
     )
 endif()
 
+if(CONFIG_ZSHELL)
+    list(APPEND test_srcs "test_shell.c")
+endif()
+
 idf_component_register(
     SRCS ${test_srcs}
     INCLUDE_DIRS "."
-    REQUIRES unity zkernel zsys
+    REQUIRES unity zkernel zsys zshell
 )

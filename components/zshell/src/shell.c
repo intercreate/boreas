@@ -113,6 +113,70 @@ static void shell_process_char(struct shell *sh, char ch)
         shell_print_prompt(sh);
         break;
 
+    case 0x01: /* Ctrl-A: move cursor to start */
+        while (sh->ctx.cmd_buff_pos > 0) {
+            sh->ctx.cmd_buff_pos--;
+            shell_write(sh, "\b", 1);
+        }
+        break;
+
+    case 0x05: /* Ctrl-E: move cursor to end */
+        if (sh->ctx.cmd_buff_pos < sh->ctx.cmd_buff_len) {
+            shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
+                        sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+            sh->ctx.cmd_buff_pos = sh->ctx.cmd_buff_len;
+        }
+        break;
+
+    case 0x0B: /* Ctrl-K: kill from cursor to end of line */
+        if (sh->ctx.cmd_buff_pos < sh->ctx.cmd_buff_len) {
+            /* Clear chars on terminal from cursor to end */
+            uint16_t erased = sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos;
+            for (uint16_t i = 0; i < erased; i++) {
+                shell_write(sh, " ", 1);
+            }
+            for (uint16_t i = 0; i < erased; i++) {
+                shell_write(sh, "\b", 1);
+            }
+            sh->ctx.cmd_buff_len = sh->ctx.cmd_buff_pos;
+        }
+        break;
+
+    case 0x17: /* Ctrl-W: delete word backward */
+        if (sh->ctx.cmd_buff_pos > 0) {
+            uint16_t start = sh->ctx.cmd_buff_pos;
+            /* Skip trailing spaces */
+            while (sh->ctx.cmd_buff_pos > 0 &&
+                   sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos - 1] == ' ') {
+                sh->ctx.cmd_buff_pos--;
+            }
+            /* Skip word chars */
+            while (sh->ctx.cmd_buff_pos > 0 &&
+                   sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos - 1] != ' ') {
+                sh->ctx.cmd_buff_pos--;
+            }
+            /* Remove the chars */
+            uint16_t removed = start - sh->ctx.cmd_buff_pos;
+            memmove(&sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
+                    &sh->ctx.cmd_buff[start],
+                    sh->ctx.cmd_buff_len - start);
+            sh->ctx.cmd_buff_len -= removed;
+            /* Redraw: move cursor back, rewrite rest, clear trailing */
+            for (uint16_t i = 0; i < removed; i++) {
+                shell_write(sh, "\b", 1);
+            }
+            shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
+                        sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+            for (uint16_t i = 0; i < removed; i++) {
+                shell_write(sh, " ", 1);
+            }
+            uint16_t move_back = sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos + removed;
+            for (uint16_t i = 0; i < move_back; i++) {
+                shell_write(sh, "\b", 1);
+            }
+        }
+        break;
+
     case 0x0C: /* Ctrl-L: clear screen */
         shell_write(sh, "\033[2J\033[H", 7);
         shell_print_prompt(sh);

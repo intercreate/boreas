@@ -18,11 +18,33 @@
 
 #include "zsys/log.h"
 
+static const char *level_str(int level)
+{
+    switch (level) {
+    case 0: return "NONE";
+    case 1: return "ERR";
+    case 2: return "WRN";
+    case 3: return "INF";
+    case 4: return "DBG";
+    case 5: return "VRB";
+    default: return "???";
+    }
+}
+
 static int cmd_log_list(const struct shell *sh, size_t argc, char **argv)
 {
     (void)argc; (void)argv;
-    shell_print(sh, "Registered log modules:");
-    zsys_log_list_modules();
+    int count = zsys_log_get_module_count();
+    shell_print(sh, "Registered log modules (%d):", count);
+    shell_print(sh, "  %-24s  %s", "Module", "Level");
+    shell_print(sh, "  %-24s  %s", "------------------------", "-----");
+    for (int i = 0; i < count; i++) {
+        const char *name;
+        int level;
+        if (zsys_log_get_module_info(i, &name, &level) == 0) {
+            shell_print(sh, "  %-24s  %s", name, level_str(level));
+        }
+    }
     return 0;
 }
 
@@ -69,13 +91,53 @@ static struct shell_static_entry _builtin_log = {
 
 #ifdef CONFIG_ZSHELL_CMD_THREAD
 
-#include "zsys/thread_analyzer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static const char *state_str(eTaskState state)
+{
+    switch (state) {
+    case eRunning:   return "Running";
+    case eReady:     return "Ready";
+    case eBlocked:   return "Blocked";
+    case eSuspended: return "Suspend";
+    case eDeleted:   return "Deleted";
+    default:         return "Unknown";
+    }
+}
 
 static int cmd_thread(const struct shell *sh, size_t argc, char **argv)
 {
     (void)argc; (void)argv;
-    shell_print(sh, "Thread statistics:");
-    zsys_thread_analyzer_print();
+
+    UBaseType_t count = uxTaskGetNumberOfTasks();
+    TaskStatus_t *tasks = pvPortMalloc(count * sizeof(TaskStatus_t));
+    if (tasks == NULL) {
+        shell_error(sh, "Failed to allocate task status array");
+        return -1;
+    }
+
+    uint32_t total_runtime;
+    UBaseType_t actual = uxTaskGetSystemState(tasks, count, &total_runtime);
+
+    shell_print(sh, "%-20s %6s %6s  %-8s %4s",
+                "Name", "Stack", "HWM", "State", "Prio");
+    shell_print(sh, "%-20s %6s %6s  %-8s %4s",
+                "--------------------", "------", "------",
+                "--------", "----");
+
+    for (UBaseType_t i = 0; i < actual; i++) {
+        TaskStatus_t *t = &tasks[i];
+        uint32_t hwm_bytes = t->usStackHighWaterMark * sizeof(StackType_t);
+        shell_print(sh, "%-20s %6s %6lu  %-8s %4lu",
+                    t->pcTaskName,
+                    "?",
+                    (unsigned long)hwm_bytes,
+                    state_str(t->eCurrentState),
+                    (unsigned long)t->uxCurrentPriority);
+    }
+
+    vPortFree(tasks);
     return 0;
 }
 
