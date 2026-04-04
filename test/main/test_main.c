@@ -16,6 +16,7 @@ void test_k_mutex_group(void);
 void test_k_msgq_group(void);
 void test_k_event_group(void);
 void test_retry_group(void);
+void test_log_group(void);
 
 /* Shell tests -- available on all targets when ZSHELL is enabled */
 #if defined(CONFIG_ZSHELL)
@@ -48,6 +49,7 @@ void app_main(void)
 
     /* System services */
     test_retry_group();
+    test_log_group();
 
 #if defined(CONFIG_ZSHELL)
     /* Shell */

@@ -5,12 +5,12 @@
 
 #include "zsys/watchdog.h"
 
-#include "esp_log.h"
+#include "zsys/log.h"
 #include "zephyr/kernel.h"
 
 #if defined(CONFIG_ZSYS_WATCHDOG)
 
-static const char *TAG = "watchdog";
+LOG_MODULE_REGISTER(watchdog, LOG_LEVEL_INF);
 
 static struct zsys_watchdog_entry *entries[CONFIG_ZSYS_WATCHDOG_MAX_ENTRIES];
 static int entry_count = 0;
@@ -30,7 +30,7 @@ static void supervisor_check(struct k_timer *timer)
         }
         int64_t elapsed = now - entry->last_feed_ms;
         if (elapsed > entry->timeout_ms) {
-            ESP_LOGE(TAG, "Watchdog timeout: %s (elapsed=%lld ms, limit=%lld ms)",
+            LOG_ERR("Watchdog timeout: %s (elapsed=%lld ms, limit=%lld ms)",
                      entry->name, (long long)elapsed,
                      (long long)entry->timeout_ms);
             if (timeout_callback) {
@@ -46,14 +46,14 @@ void zsys_watchdog_init(k_timeout_t check_interval,
     timeout_callback = timeout_cb;
     k_timer_init(&supervisor_timer, supervisor_check, NULL);
     k_timer_start(&supervisor_timer, check_interval, check_interval);
-    ESP_LOGI(TAG, "Watchdog supervisor started");
+    LOG_INF("Watchdog supervisor started");
 }
 
 int zsys_watchdog_register(struct zsys_watchdog_entry *entry,
                            const char *name, k_timeout_t timeout)
 {
     if (entry_count >= CONFIG_ZSYS_WATCHDOG_MAX_ENTRIES) {
-        ESP_LOGE(TAG, "Watchdog registry full");
+        LOG_ERR("Watchdog registry full");
         return -1;
     }
 
@@ -64,7 +64,7 @@ int zsys_watchdog_register(struct zsys_watchdog_entry *entry,
     entry->active = true;
 
     entries[entry_count++] = entry;
-    ESP_LOGI(TAG, "Registered: %s (timeout=%lld ms)",
+    LOG_INF("Registered: %s (timeout=%lld ms)",
              name, (long long)entry->timeout_ms);
     return 0;
 }

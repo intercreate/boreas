@@ -15,11 +15,11 @@
 #include <fcntl.h>
 #include <string.h>
 
-#include "esp_log.h"
+#include "zsys/log.h"
 #include "esp_vfs_dev.h"
 #include "driver/uart.h"
 
-static const char *TAG = "shell_uart";
+LOG_MODULE_REGISTER(shell_uart, LOG_LEVEL_INF);
 
 struct shell_uart_ctx {
     bool initialized;
@@ -43,7 +43,7 @@ static int shell_uart_init(const struct shell_transport *transport,
 
     uart_ctx.initialized = true;
 
-    ESP_LOGI(TAG, "Shell transport initialized (VFS console)");
+    LOG_INF("Shell transport initialized (VFS console)");
     return 0;
 }
 

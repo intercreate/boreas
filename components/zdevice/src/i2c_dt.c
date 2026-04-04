@@ -1,9 +1,9 @@
 #include "i2c_dt.h"
-#include "esp_log.h"
+#include "zsys/log.h"
 #include "zephyr/sys/util.h"
 #include <string.h>
 
-#define TAG "i2c_dt"
+LOG_MODULE_REGISTER(i2c_dt, LOG_LEVEL_INF);
 
 #define I2C_BURST_WRITE_MAX 32
 
@@ -16,7 +16,7 @@ esp_err_t i2c_bus_init(const struct device *dev)
 
     /* If the bus already exists (created by another subsystem), reuse it */
     if (i2c_master_get_bus_handle(cfg->port, &data->bus_handle) == ESP_OK) {
-        ESP_LOGI(TAG, "reusing existing I2C bus on port %d", cfg->port);
+        LOG_INF("reusing existing I2C bus on port %d", cfg->port);
         return ESP_OK;
     }
 
@@ -50,7 +50,7 @@ esp_err_t i2c_dt_attach(const struct i2c_dt_spec *spec)
     __ASSERT(i2c_dt_resolve(spec) == NULL, "i2c_dt_attach: address already attached");
 
     if (bus->device_count >= I2C_DT_MAX_DEVICES) {
-        ESP_LOGE(TAG, "bus full: cannot attach addr 0x%02x", spec->addr);
+        LOG_ERR("bus full: cannot attach addr 0x%02x", spec->addr);
         return ESP_ERR_NO_MEM;
     }
 

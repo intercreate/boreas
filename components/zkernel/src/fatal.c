@@ -110,8 +110,19 @@ void k_fatal_init(void)
 #endif
 }
 
+/* Weak hook for zsys logging panic mode.
+ * zsys provides the strong definition that drains the log queue
+ * and switches to synchronous output. */
+__attribute__((weak))
+void zsys_log_panic(void)
+{
+}
+
 void k_fatal_error(enum k_fatal_reason reason, const char *file, int line)
 {
+    /* Switch logging to synchronous/panic mode before any output */
+    zsys_log_panic();
+
     ESP_LOGE(TAG, "FATAL: reason=%d at %s:%d", reason,
              file ? file : "?", line);
 
