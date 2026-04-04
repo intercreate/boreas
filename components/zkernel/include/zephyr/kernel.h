@@ -26,6 +26,10 @@
 
 #include "esp_timer.h"
 
+#if CONFIG_IDF_TARGET_LINUX
+#include <sys/time.h>
+#endif
+
 #include "zephyr/sys/dlist.h"
 #include "zephyr/sys/time_units.h"
 #include "zephyr/sys/util.h"
@@ -41,13 +45,19 @@ extern "C" {
 /** Get system uptime in milliseconds (monotonic). */
 static inline int64_t k_uptime_get(void)
 {
+#if CONFIG_IDF_TARGET_LINUX
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+#else
     return esp_timer_get_time() / 1000;
+#endif
 }
 
 /** Get system uptime in 32-bit milliseconds (wraps). */
 static inline uint32_t k_uptime_get_32(void)
 {
-    return (uint32_t)(esp_timer_get_time() / 1000);
+    return (uint32_t)k_uptime_get();
 }
 
 /**

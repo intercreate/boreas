@@ -1,8 +1,8 @@
 #include "spi_dt.h"
-#include "esp_log.h"
+#include "zsys/log.h"
 #include <string.h>
 
-#define TAG "spi_dt"
+LOG_MODULE_REGISTER(spi_dt, LOG_LEVEL_INF);
 
 esp_err_t spi_bus_init(const struct device *dev)
 {
@@ -41,7 +41,7 @@ esp_err_t spi_dt_attach(const struct spi_dt_spec *spec)
     struct spi_bus_data *bus = spec->bus->data;
 
     if (bus->device_count >= SPI_DT_MAX_DEVICES) {
-        ESP_LOGE(TAG, "bus full: cannot attach cs=%d", spec->cs_gpio);
+        LOG_ERR("bus full: cannot attach cs=%d", spec->cs_gpio);
         return ESP_ERR_NO_MEM;
     }
 

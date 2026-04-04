@@ -8,6 +8,7 @@ set(test_srcs
     "test_k_msgq.c"
     "test_k_event.c"
     "test_retry.c"
+    "test_log.c"
 )
 
 idf_build_get_property(target IDF_TARGET)

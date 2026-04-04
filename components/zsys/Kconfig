@@ -14,6 +14,59 @@ menu "Boreas System Services (zsys)"
         help
             Maximum number of modules that can register via LOG_MODULE_REGISTER.
 
+    config ZSYS_LOG_MAX_LEVEL
+        int "Maximum compile-time log level (0=NONE, 1=ERR, 2=WRN, 3=INF, 4=DBG)"
+        default 4
+        depends on ZSYS_LOG_MODULE
+        help
+            Log calls above this level are compiled out entirely.
+            0 = no logging, 1 = errors only, 2 = +warnings,
+            3 = +info (default for most modules), 4 = +debug.
+
+    config ZSYS_LOG_MSG_MAX_LEN
+        int "Maximum formatted message length (bytes)"
+        default 80
+        depends on ZSYS_LOG_MODULE
+        help
+            Maximum length of the pre-formatted text field in each log message.
+            Messages longer than this are truncated.
+
+    config ZSYS_LOG_MAX_BACKENDS
+        int "Maximum number of log backends"
+        default 4
+        depends on ZSYS_LOG_MODULE
+        help
+            Maximum number of log backends that can be registered.
+
+    config ZSYS_LOG_MODE_DEFERRED
+        bool "Enable deferred (asynchronous) log output"
+        default n
+        depends on ZSYS_LOG_MODULE
+        help
+            When enabled, log messages are queued to a ring buffer and
+            written by a dedicated output thread. ISR-safe, non-blocking.
+            When disabled, log output is synchronous (immediate).
+
+    config ZSYS_LOG_BUFFER_COUNT
+        int "Number of log messages in deferred buffer"
+        default 32
+        depends on ZSYS_LOG_MODE_DEFERRED
+        help
+            Number of struct log_msg entries in the static ring buffer.
+            Each entry is ~128 bytes. 32 entries = 4 KB.
+
+    config ZSYS_LOG_THREAD_STACK_SIZE
+        int "Log output thread stack size (bytes)"
+        default 2048
+        depends on ZSYS_LOG_MODE_DEFERRED
+
+    config ZSYS_LOG_THREAD_PRIORITY
+        int "Log output thread priority (FreeRTOS)"
+        default 2
+        depends on ZSYS_LOG_MODE_DEFERRED
+        help
+            Low priority so logging doesn't preempt application work.
+
     config ZSYS_THREAD_ANALYZER
         bool "Enable thread analyzer"
         default n

@@ -5,11 +5,11 @@
 
 #include "zsys/thread_analyzer.h"
 
-#include "esp_log.h"
+#include "zsys/log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *TAG = "thread_analyzer";
+LOG_MODULE_REGISTER(thread_analyzer, LOG_LEVEL_INF);
 
 static const char *state_to_str(eTaskState state)
 {
@@ -28,7 +28,7 @@ void zsys_thread_analyzer_print(void)
     UBaseType_t count = uxTaskGetNumberOfTasks();
     TaskStatus_t *status_array = pvPortMalloc(count * sizeof(TaskStatus_t));
     if (status_array == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate task status array");
+        LOG_ERR("Failed to allocate task status array");
         return;
     }
 
@@ -36,9 +36,9 @@ void zsys_thread_analyzer_print(void)
     UBaseType_t actual = uxTaskGetSystemState(status_array, count,
                                               &total_runtime);
 
-    ESP_LOGI(TAG, "%-20s %6s %6s %6s  %-8s %4s",
+    LOG_INF("%-20s %6s %6s %6s  %-8s %4s",
              "Name", "Stack", "HWM", "Free", "State", "Prio");
-    ESP_LOGI(TAG, "%-20s %6s %6s %6s  %-8s %4s",
+    LOG_INF("%-20s %6s %6s %6s  %-8s %4s",
              "--------------------", "------", "------", "------",
              "--------", "----");
 
@@ -47,7 +47,7 @@ void zsys_thread_analyzer_print(void)
         /* High water mark is in StackType_t units (typically 4 bytes) */
         uint32_t hwm_bytes = t->usStackHighWaterMark * sizeof(StackType_t);
 
-        ESP_LOGI(TAG, "%-20s %6s %6lu %6s  %-8s %4lu",
+        LOG_INF("%-20s %6s %6lu %6s  %-8s %4lu",
                  t->pcTaskName,
                  "?",  /* Total stack not available from FreeRTOS */
                  (unsigned long)hwm_bytes,

@@ -2,45 +2,65 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Intercreate
  *
- * Per-module runtime log level control.
+ * Zephyr-compatible logging subsystem.
  *
  * Usage:
- *   // In source file
+ *   // In source file (one per .c file)
+ *   #include "zsys/log.h"
  *   LOG_MODULE_REGISTER(sip_service, LOG_LEVEL_INF);
  *
- *   // At runtime (e.g., from CLI)
- *   zsys_log_set_level("sip_service", ESP_LOG_DEBUG);
- *   zsys_log_list_modules();
+ *   void my_function(void) {
+ *       LOG_INF("started with %d items", count);
+ *       LOG_ERR("failed: %s", reason);
+ *       LOG_DBG("detail: x=%d y=%d", x, y);
+ *   }
+ *
+ *   // At runtime (e.g., from shell)
+ *   zsys_log_set_level("sip_service", LOG_LEVEL_DBG);
  */
 
 #pragma once
 
 #include "esp_log.h"
 
+#include "zsys/log_backend.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Log levels -- alias Zephyr names to ESP-IDF levels */
-#define LOG_LEVEL_NONE ESP_LOG_NONE
-#define LOG_LEVEL_ERR  ESP_LOG_ERROR
-#define LOG_LEVEL_WRN  ESP_LOG_WARN
-#define LOG_LEVEL_INF  ESP_LOG_INFO
-#define LOG_LEVEL_DBG  ESP_LOG_DEBUG
+/* --------------------------------------------------------------------------
+ * Log levels (0-4, numerically matches ESP-IDF values)
+ * -------------------------------------------------------------------------- */
 
-/**
- * Register a log module with a default level.
- * Sets the ESP-IDF log level for this module's TAG at startup.
- */
+#define LOG_LEVEL_NONE 0
+#define LOG_LEVEL_ERR  1
+#define LOG_LEVEL_WRN  2
+#define LOG_LEVEL_INF  3
+#define LOG_LEVEL_DBG  4
+
+/* --------------------------------------------------------------------------
+ * Compile-time level stripping
+ * -------------------------------------------------------------------------- */
+
+#ifndef CONFIG_ZSYS_LOG_MAX_LEVEL
+#define CONFIG_ZSYS_LOG_MAX_LEVEL LOG_LEVEL_DBG
+#endif
+
+/* --------------------------------------------------------------------------
+ * Module registration
+ * -------------------------------------------------------------------------- */
+
 #if defined(CONFIG_ZSYS_LOG_MODULE)
 
-#define LOG_MODULE_REGISTER(module_name, default_level)             \
-    static const char *TAG = #module_name;                          \
-    static void __attribute__((constructor))                        \
-    _log_module_register_##module_name(void)                        \
-    {                                                               \
-        esp_log_level_set(#module_name, (default_level));           \
-        zsys_log_register_module(#module_name, (default_level));    \
+#define LOG_MODULE_REGISTER(module_name, default_level)                     \
+    static const char *TAG = #module_name;                                  \
+    static void __attribute__((constructor))                                \
+    _log_module_register_##module_name(void)                                \
+    {                                                                       \
+        esp_log_level_set(#module_name, (esp_log_level_t)(default_level));  \
+        zsys_log_register_module(#module_name,                              \
+                                 (esp_log_level_t)(default_level));         \
     }
 
 #else
@@ -50,32 +70,83 @@ extern "C" {
 
 #endif
 
+/* --------------------------------------------------------------------------
+ * LOG output macros
+ *
+ * When CONFIG_ZSYS_LOG_MODULE is enabled:
+ *   - Compile-time stripping via CONFIG_ZSYS_LOG_MAX_LEVEL
+ *   - Routes through zsys_log_msg_emit (sync or deferred)
+ *
+ * When CONFIG_ZSYS_LOG_MODULE is disabled:
+ *   - Falls back to ESP_LOG* with zero overhead
+ * -------------------------------------------------------------------------- */
+
+#if defined(CONFIG_ZSYS_LOG_MODULE)
+
+#define _ZSYS_LOG(_level, _tag, _fmt, ...)                                  \
+    do {                                                                     \
+        if ((_level) <= CONFIG_ZSYS_LOG_MAX_LEVEL) {                        \
+            zsys_log_msg_emit((_level), (_tag), _fmt, ##__VA_ARGS__);       \
+        }                                                                    \
+    } while (0)
+
+#define LOG_ERR(fmt, ...) _ZSYS_LOG(LOG_LEVEL_ERR, TAG, fmt, ##__VA_ARGS__)
+#define LOG_WRN(fmt, ...) _ZSYS_LOG(LOG_LEVEL_WRN, TAG, fmt, ##__VA_ARGS__)
+#define LOG_INF(fmt, ...) _ZSYS_LOG(LOG_LEVEL_INF, TAG, fmt, ##__VA_ARGS__)
+#define LOG_DBG(fmt, ...) _ZSYS_LOG(LOG_LEVEL_DBG, TAG, fmt, ##__VA_ARGS__)
+
+#else
+
+/* Fallback: direct ESP-IDF logging, no overhead */
+#define LOG_ERR(fmt, ...) ESP_LOGE(TAG, fmt, ##__VA_ARGS__)
+#define LOG_WRN(fmt, ...) ESP_LOGW(TAG, fmt, ##__VA_ARGS__)
+#define LOG_INF(fmt, ...) ESP_LOGI(TAG, fmt, ##__VA_ARGS__)
+#define LOG_DBG(fmt, ...) ESP_LOGD(TAG, fmt, ##__VA_ARGS__)
+
+#endif
+
+/* --------------------------------------------------------------------------
+ * Core API
+ * -------------------------------------------------------------------------- */
+
 /**
- * Register a module (called from LOG_MODULE_REGISTER constructor).
+ * Emit a log message. Handles runtime level check and sync/deferred dispatch.
+ * ISR-safe when deferred mode is active.
  */
+void zsys_log_msg_emit(uint8_t level, const char *module,
+                       const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
+/**
+ * Initialize the logging subsystem.
+ * - Initializes all registered backends
+ * - In deferred mode: creates the output thread
+ * Call from app_main() or via SYS_INIT. If never called, logging
+ * stays in synchronous mode with the default ESP backend.
+ */
+int zsys_log_init(void);
+
+/**
+ * Switch to panic mode: drain the message queue synchronously,
+ * switch to direct output, and notify backends.
+ * Called from k_fatal_error() before reboot.
+ */
+void zsys_log_panic(void);
+
+/**
+ * Get the number of dropped messages (queue-full events in deferred mode).
+ */
+uint32_t zsys_log_get_dropped_count(void);
+
+/* --------------------------------------------------------------------------
+ * Module registry API (unchanged)
+ * -------------------------------------------------------------------------- */
+
 void zsys_log_register_module(const char *name, esp_log_level_t default_level);
-
-/**
- * Set the runtime log level for a module by name.
- * Returns 0 on success, -1 if module not found.
- */
-int zsys_log_set_level(const char *module_name, esp_log_level_t level);
-
-/**
- * Print all registered modules and their current levels (via ESP_LOG).
- */
+int  zsys_log_set_level(const char *module_name, esp_log_level_t level);
 void zsys_log_list_modules(void);
-
-/**
- * Get the number of registered modules.
- */
-int zsys_log_get_module_count(void);
-
-/**
- * Get module info by index.
- * Returns 0 on success, -1 if index out of range.
- */
-int zsys_log_get_module_info(int index, const char **name, int *level);
+int  zsys_log_get_module_count(void);
+int  zsys_log_get_module_info(int index, const char **name, int *level);
 
 #ifdef __cplusplus
 }

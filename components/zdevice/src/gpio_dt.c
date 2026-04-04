@@ -1,8 +1,8 @@
 #include "gpio_dt.h"
-#include "esp_log.h"
+#include "zsys/log.h"
 #include "freertos/FreeRTOS.h"
 
-#define TAG "gpio_esp32"
+LOG_MODULE_REGISTER(gpio_esp32, LOG_LEVEL_INF);
 
 static esp_err_t gpio_esp32_pin_configure(const struct device *port, gpio_num_t pin, uint32_t flags)
 {
@@ -53,7 +53,7 @@ esp_err_t gpio_esp32_init(const struct device *dev)
         return ret;
     }
 
-    ESP_LOGI(TAG, "initialized");
+    LOG_INF("initialized");
     return ESP_OK;
 }
 

@@ -11,9 +11,9 @@
 
 #include <string.h>
 
-#include "esp_log.h"
+#include "zsys/log.h"
 
-static const char *TAG = "shell";
+LOG_MODULE_REGISTER(shell, LOG_LEVEL_INF);
 
 /* ----------------------------------------------------------------
  * Character Processing
@@ -238,7 +238,7 @@ static void shell_thread_entry(void *p1, void *p2, void *p3)
     }
 
     sh->ctx.state = SHELL_STATE_ACTIVE;
-    ESP_LOGI(TAG, "Shell '%s' started", sh->name ? sh->name : "default");
+    LOG_INF("Shell '%s' started", sh->name ? sh->name : "default");
 
     /* Print initial prompt */
     shell_write(sh, "\r\n", 2);
@@ -299,6 +299,6 @@ int shell_init(struct shell *sh, const struct shell_transport *transport,
                     CONFIG_ZSHELL_THREAD_PRIORITY, 0, K_NO_WAIT);
     k_thread_name_set(&sh->thread, "shell");
 
-    ESP_LOGI(TAG, "Shell initialized (%zu root commands)", _shell_root_cmd_count);
+    LOG_INF("Shell initialized (%zu root commands)", _shell_root_cmd_count);
     return 0;
 }
