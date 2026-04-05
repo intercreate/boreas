@@ -12,13 +12,28 @@
 static const char *TAG = "k_thread";
 
 /* Trampoline: adapts Zephyr's 3-arg entry to FreeRTOS's 1-arg entry.
+ * If _start_suspended is set, suspends self before calling entry
+ * (used for K_FOREVER and finite-delay deferred start).
  * After the entry function returns, the thread suspends itself
  * (safe for static tasks -- vTaskDelete is NOT safe with static TCBs). */
 static void k_thread_entry_wrapper(void *arg)
 {
     struct k_thread *thread = (struct k_thread *)arg;
+
+    if (thread->_start_suspended) {
+        vTaskSuspend(NULL); /* wait for k_thread_resume or timer callback */
+    }
+
     thread->entry(thread->p1, thread->p2, thread->p3);
     vTaskSuspend(NULL);
+}
+
+static void k_thread_delay_expiry(struct k_timer *timer)
+{
+    struct k_thread *thread = (struct k_thread *)k_timer_user_data_get(timer);
+    if (thread && thread->handle) {
+        vTaskResume(thread->handle);
+    }
 }
 
 void k_thread_create(struct k_thread *thread, StackType_t *stack,
@@ -27,7 +42,6 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack,
                      int prio, uint32_t options, k_timeout_t delay)
 {
     (void)options;
-    (void)delay; /* TODO: deferred start via k_timer */
 
     thread->stack = stack;
     thread->stack_size = stack_size;
@@ -35,6 +49,10 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack,
     thread->p1 = p1;
     thread->p2 = p2;
     thread->p3 = p3;
+    thread->_delay_timer.handle = NULL; /* explicitly clear for abort safety */
+
+    /* Set flag BEFORE creating task so the wrapper sees it immediately */
+    thread->_start_suspended = !k_timeout_is_no_wait(delay);
 
     thread->handle = xTaskCreateStatic(
         k_thread_entry_wrapper,
@@ -47,7 +65,17 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack,
 
     if (thread->handle == NULL) {
         ESP_LOGE(TAG, "Failed to create thread");
+        return;
     }
+
+    if (!k_timeout_is_forever(delay) && !k_timeout_is_no_wait(delay)) {
+        /* Finite delay: thread self-suspended, set up timer to resume */
+        k_timer_init(&thread->_delay_timer, k_thread_delay_expiry, NULL);
+        k_timer_user_data_set(&thread->_delay_timer, thread);
+        k_timer_start(&thread->_delay_timer, delay, K_NO_WAIT);
+    }
+    /* K_FOREVER: thread self-suspended, user calls k_thread_resume */
+    /* K_NO_WAIT: _start_suspended=false, thread runs immediately */
 }
 
 void k_thread_name_set(struct k_thread *thread, const char *name)
@@ -60,6 +88,10 @@ void k_thread_name_set(struct k_thread *thread, const char *name)
 void k_thread_abort(struct k_thread *thread)
 {
     if (thread->handle != NULL) {
+        /* Stop delay timer if it was used for deferred start */
+        if (thread->_delay_timer.handle != NULL) {
+            k_timer_stop(&thread->_delay_timer);
+        }
         vTaskDelete(thread->handle);
         thread->handle = NULL;
     }

@@ -339,6 +339,38 @@ int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
                     msg->text);
 }
 
+void zsys_log_hexdump(uint8_t level, const char *module,
+                      const void *data, size_t len, const char *label)
+{
+    if ((int)level > get_runtime_level(module)) {
+        return;
+    }
+
+    const uint8_t *bytes = (const uint8_t *)data;
+
+    /* First line: label with length */
+    zsys_log_msg_emit(level, module, "%s (%u bytes):", label ? label : "hex",
+                      (unsigned)len);
+
+    /* Format 16 bytes per line */
+    for (size_t offset = 0; offset < len; offset += 16) {
+        char line[64];
+        int pos = 0;
+        size_t row_len = (len - offset > 16) ? 16 : (len - offset);
+
+        for (size_t i = 0; i < row_len; i++) {
+            if (i == 8) {
+                line[pos++] = ' ';
+            }
+            pos += snprintf(line + pos, sizeof(line) - pos, " %02X",
+                            bytes[offset + i]);
+        }
+        line[pos] = '\0';
+
+        zsys_log_msg_emit(level, module, "%s", line);
+    }
+}
+
 #else /* !CONFIG_ZSYS_LOG_MODULE */
 
 /* Stubs when logging module is disabled */
@@ -377,6 +409,12 @@ void zsys_log_msg_emit(uint8_t level, const char *module,
 int zsys_log_init(void) { return 0; }
 void zsys_log_panic(void) {}
 uint32_t zsys_log_get_dropped_count(void) { return 0; }
+
+void zsys_log_hexdump(uint8_t level, const char *module,
+                      const void *data, size_t len, const char *label)
+{
+    (void)level; (void)module; (void)data; (void)len; (void)label;
+}
 
 int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
 {

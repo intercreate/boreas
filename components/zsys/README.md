@@ -40,6 +40,21 @@ LOG_INF("hello %d", 42)
 
 When `CONFIG_ZSYS_LOG_MODULE=n`, macros fall back to `ESP_LOG*` directly -- zero overhead.
 
+### Hex dump
+
+```c
+uint8_t buf[] = { 0xDE, 0xAD, 0xBE, 0xEF };
+LOG_HEXDUMP_INF(buf, sizeof(buf), "packet");
+```
+
+Output (16 bytes per line, goes through backends like normal log messages):
+```
+I (123) my_module: packet (4 bytes):
+I (123) my_module:  DE AD BE EF
+```
+
+Also available: `LOG_HEXDUMP_ERR`, `LOG_HEXDUMP_WRN`, `LOG_HEXDUMP_DBG`. Compile-time strippable.
+
 ### Runtime level control
 
 ```c

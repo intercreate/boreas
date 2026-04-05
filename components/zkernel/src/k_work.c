@@ -48,6 +48,13 @@ static void k_work_queue_thread(void *p1)
                 __atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
                 work->handler(work);
                 __atomic_and_fetch(&work->flags, ~K_WORK_RUNNING, __ATOMIC_RELAXED);
+
+                /* Signal any flush waiter */
+                struct k_work_sync *sync = work->sync;
+                if (sync) {
+                    work->sync = NULL;
+                    k_sem_give(&sync->sem);
+                }
             }
         }
     }
@@ -61,6 +68,7 @@ void k_work_init(struct k_work *work, k_work_handler_t handler)
 {
     work->handler = handler;
     work->flags = 0;
+    work->sync = NULL;
     work->node.next = NULL;
     work->node.prev = NULL;
 }
@@ -123,6 +131,41 @@ bool k_work_is_pending(struct k_work *work)
             (K_WORK_QUEUED | K_WORK_RUNNING)) != 0;
 }
 
+int k_work_flush(struct k_work *work, struct k_work_sync *sync)
+{
+    /* Set up sync BEFORE checking state to avoid TOCTOU race:
+     * if work finishes between our check and sem_take, the worker
+     * thread will have already signaled the semaphore. */
+    k_sem_init(&sync->sem, 0, 1);
+    work->sync = sync;
+
+    if (!k_work_is_pending(work)) {
+        work->sync = NULL;
+        return 0; /* Nothing to flush */
+    }
+
+    /* Block until the worker thread signals completion */
+    return k_sem_take(&sync->sem, K_FOREVER);
+}
+
+int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync)
+{
+    /* Set up sync BEFORE cancelling to avoid TOCTOU race */
+    k_sem_init(&sync->sem, 0, 1);
+    work->sync = sync;
+
+    /* Try to cancel (clears QUEUED flag) */
+    k_work_cancel(work);
+
+    /* If it was running when we cancelled, wait for it to finish */
+    if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_RUNNING) {
+        return k_sem_take(&sync->sem, K_FOREVER);
+    }
+
+    work->sync = NULL;
+    return 0;
+}
+
 /* ----------------------------------------------------------------
  * Work Queue Lifecycle
  * ---------------------------------------------------------------- */
@@ -139,6 +182,11 @@ void k_work_queue_init(struct k_work_queue *queue)
 void k_work_queue_start(struct k_work_queue *queue, const char *name,
                         uint32_t stack_size, int prio)
 {
+    /* Idempotent: no-op if already started */
+    if (queue->queue != NULL) {
+        return;
+    }
+
     queue->name = name;
 
     /* Create queue for work item pointers */
@@ -160,6 +208,13 @@ void k_work_queue_start(struct k_work_queue *queue, const char *name,
 
     ESP_LOGI(TAG, "Work queue '%s' started (prio=%d, stack=%lu)",
              name, prio, (unsigned long)stack_size);
+}
+
+/* Auto-initialize the system work queue before main() */
+static void __attribute__((constructor)) _sys_work_q_auto_init(void)
+{
+    k_work_queue_init(&k_sys_work_q);
+    k_work_queue_start(&k_sys_work_q, "sys_wq", SYS_WQ_STACK_SIZE, 5);
 }
 
 /* ----------------------------------------------------------------

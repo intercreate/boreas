@@ -232,6 +232,51 @@ static void test_log_dropped_count(void)
     TEST_ASSERT_EQUAL(0, dropped);
 }
 
+static void test_log_hexdump(void)
+{
+    capture_reset();
+
+    uint8_t data[] = { 0x00, 0x01, 0x02, 0x03, 0xAA, 0xBB, 0xCC, 0xFF };
+    LOG_HEXDUMP_INF(data, sizeof(data), "test data");
+
+    /* Should get 2 messages: label line + 1 hex line (8 bytes < 16) */
+    TEST_ASSERT_GREATER_OR_EQUAL(2, _capture_count);
+
+    /* First message: label */
+    TEST_ASSERT_NOT_NULL(strstr(_captured[0].text, "test data"));
+    TEST_ASSERT_NOT_NULL(strstr(_captured[0].text, "8 bytes"));
+
+    /* Second message: hex values */
+    TEST_ASSERT_NOT_NULL(strstr(_captured[1].text, "00"));
+    TEST_ASSERT_NOT_NULL(strstr(_captured[1].text, "FF"));
+
+    capture_stop();
+}
+
+static void test_log_hexdump_multiline(void)
+{
+    capture_reset();
+
+    uint8_t data[32];
+    for (int i = 0; i < 32; i++) {
+        data[i] = (uint8_t)i;
+    }
+    LOG_HEXDUMP_DBG(data, sizeof(data), "multi");
+
+    /* 1 label + 2 hex lines (32 bytes / 16 per line) */
+    TEST_ASSERT_GREATER_OR_EQUAL(3, _capture_count);
+
+    /* First hex line should have 00..0F */
+    TEST_ASSERT_NOT_NULL(strstr(_captured[1].text, "00"));
+    TEST_ASSERT_NOT_NULL(strstr(_captured[1].text, "0F"));
+
+    /* Second hex line should have 10..1F */
+    TEST_ASSERT_NOT_NULL(strstr(_captured[2].text, "10"));
+    TEST_ASSERT_NOT_NULL(strstr(_captured[2].text, "1F"));
+
+    capture_stop();
+}
+
 /* -----------------------------------------------------------------------
  * Test group
  * ----------------------------------------------------------------------- */
@@ -252,4 +297,6 @@ void test_log_group(void)
     RUN_TEST(test_log_message_truncation);
     RUN_TEST(test_log_backend_count);
     RUN_TEST(test_log_dropped_count);
+    RUN_TEST(test_log_hexdump);
+    RUN_TEST(test_log_hexdump_multiline);
 }

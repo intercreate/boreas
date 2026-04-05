@@ -105,6 +105,18 @@ extern "C" {
 #define LOG_INF(fmt, ...) _ZSYS_LOG(LOG_LEVEL_INF, TAG, fmt, ##__VA_ARGS__)
 #define LOG_DBG(fmt, ...) _ZSYS_LOG(LOG_LEVEL_DBG, TAG, fmt, ##__VA_ARGS__)
 
+#define _ZSYS_LOG_HEXDUMP(_level, _tag, _data, _len, _label)               \
+    do {                                                                     \
+        if ((_level) <= CONFIG_ZSYS_LOG_MAX_LEVEL) {                        \
+            zsys_log_hexdump((_level), (_tag), (_data), (_len), (_label));  \
+        }                                                                    \
+    } while (0)
+
+#define LOG_HEXDUMP_ERR(data, len, label) _ZSYS_LOG_HEXDUMP(LOG_LEVEL_ERR, TAG, data, len, label)
+#define LOG_HEXDUMP_WRN(data, len, label) _ZSYS_LOG_HEXDUMP(LOG_LEVEL_WRN, TAG, data, len, label)
+#define LOG_HEXDUMP_INF(data, len, label) _ZSYS_LOG_HEXDUMP(LOG_LEVEL_INF, TAG, data, len, label)
+#define LOG_HEXDUMP_DBG(data, len, label) _ZSYS_LOG_HEXDUMP(LOG_LEVEL_DBG, TAG, data, len, label)
+
 #else
 
 /* Fallback: direct ESP-IDF logging, no overhead */
@@ -112,6 +124,11 @@ extern "C" {
 #define LOG_WRN(fmt, ...) ESP_LOGW(TAG, fmt, ##__VA_ARGS__)
 #define LOG_INF(fmt, ...) ESP_LOGI(TAG, fmt, ##__VA_ARGS__)
 #define LOG_DBG(fmt, ...) ESP_LOGD(TAG, fmt, ##__VA_ARGS__)
+
+#define LOG_HEXDUMP_ERR(data, len, label) ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, len, ESP_LOG_ERROR)
+#define LOG_HEXDUMP_WRN(data, len, label) ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, len, ESP_LOG_WARN)
+#define LOG_HEXDUMP_INF(data, len, label) ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, len, ESP_LOG_INFO)
+#define LOG_HEXDUMP_DBG(data, len, label) ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, len, ESP_LOG_DEBUG)
 
 #endif
 
@@ -147,6 +164,13 @@ void zsys_log_panic(void);
  * Get the number of dropped messages (queue-full events in deferred mode).
  */
 uint32_t zsys_log_get_dropped_count(void);
+
+/**
+ * Log a hex dump of binary data. Output as one message per 16-byte line.
+ * Goes through the same dispatch path as LOG_* (backends, deferred mode).
+ */
+void zsys_log_hexdump(uint8_t level, const char *module,
+                      const void *data, size_t len, const char *label);
 
 /* --------------------------------------------------------------------------
  * Module registry API (unchanged)

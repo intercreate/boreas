@@ -4,6 +4,7 @@
  */
 
 #include <stdint.h>
+#include <string.h>
 
 #include "unity.h"
 #include "zephyr/kernel.h"
@@ -162,6 +163,63 @@ static void test_thread_three_params(void)
     k_thread_abort(&thread);
 }
 
+static volatile int deferred_ran;
+
+static void deferred_entry(void *p1, void *p2, void *p3)
+{
+    (void)p2; (void)p3;
+    volatile int *flag = (volatile int *)p1;
+    *flag = 1;
+    /* Return — k_thread_entry_wrapper suspends the task for us */
+}
+
+/* Static allocation for deferred tests -- k_thread with embedded k_timer
+ * must outlive the test function to avoid corrupting the esp_timer handle */
+K_THREAD_STACK_DEFINE(deferred_stack, 4096);
+static struct k_thread deferred_thread;
+
+static void test_thread_deferred_forever(void)
+{
+    memset(&deferred_thread, 0, sizeof(deferred_thread));
+    deferred_ran = 0;
+
+    /* K_FOREVER: thread should NOT run until resumed */
+    k_thread_create(&deferred_thread, deferred_stack,
+                    K_THREAD_STACK_SIZEOF(deferred_stack),
+                    deferred_entry, (void *)&deferred_ran, NULL, NULL,
+                    5, 0, K_FOREVER);
+
+    k_msleep(100);
+    TEST_ASSERT_EQUAL(0, deferred_ran);
+
+    /* Resume it */
+    k_thread_resume(&deferred_thread);
+    k_msleep(50);
+    TEST_ASSERT_EQUAL(1, deferred_ran);
+
+    k_thread_abort(&deferred_thread);
+}
+
+static void test_thread_deferred_delay(void)
+{
+    memset(&deferred_thread, 0, sizeof(deferred_thread));
+    deferred_ran = 0;
+
+    /* K_MSEC(200): thread should start after ~200ms */
+    k_thread_create(&deferred_thread, deferred_stack,
+                    K_THREAD_STACK_SIZEOF(deferred_stack),
+                    deferred_entry, (void *)&deferred_ran, NULL, NULL,
+                    5, 0, K_MSEC(200));
+
+    k_msleep(50);
+    TEST_ASSERT_EQUAL(0, deferred_ran); /* too early */
+
+    k_msleep(250);
+    TEST_ASSERT_EQUAL(1, deferred_ran); /* should have started */
+
+    k_thread_abort(&deferred_thread);
+}
+
 void test_k_thread_group(void)
 {
     RUN_TEST(test_thread_create_and_run);
@@ -170,4 +228,6 @@ void test_k_thread_group(void)
     RUN_TEST(test_thread_abort);
     RUN_TEST(test_thread_join);
     RUN_TEST(test_thread_three_params);
+    RUN_TEST(test_thread_deferred_forever);
+    RUN_TEST(test_thread_deferred_delay);
 }
