@@ -63,10 +63,20 @@ extern "C" {
                                  (esp_log_level_t)(default_level));         \
     }
 
+/**
+ * Declare use of a log module registered in another file.
+ * Shares the same TAG and level control as the registering file.
+ */
+#define LOG_MODULE_DECLARE(module_name) \
+    extern const char *TAG
+
 #else
 
 #define LOG_MODULE_REGISTER(module_name, default_level) \
     static const char *TAG = #module_name
+
+#define LOG_MODULE_DECLARE(module_name) \
+    extern const char *TAG
 
 #endif
 

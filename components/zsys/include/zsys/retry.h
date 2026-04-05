@@ -11,7 +11,7 @@
  *   while (!connected && !retry_exhausted(&ctx)) {
  *       attempt_connect();
  *       k_timeout_t delay = retry_next_delay(&ctx);
- *       k_msleep(delay.ticks * portTICK_PERIOD_MS);
+ *       k_msleep(delay.ms);
  *   }
  */
 

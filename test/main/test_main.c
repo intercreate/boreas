@@ -30,6 +30,7 @@ void test_sleep_group(void);
 void test_k_timer_group(void);
 void test_k_work_group(void);
 void test_k_thread_group(void);
+void test_k_mutex_pi_group(void);
 #endif
 
 void app_main(void)
@@ -63,6 +64,9 @@ void app_main(void)
 
     /* Layer 1: Thread */
     test_k_thread_group();
+
+    /* Mutex priority inheritance (needs real scheduling) */
+    test_k_mutex_pi_group();
 
     /* Layer 2: Timer & Work Queue */
     test_k_timer_group();

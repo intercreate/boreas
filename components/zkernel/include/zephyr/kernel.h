@@ -126,11 +126,17 @@ unsigned int k_sem_count_get(struct k_sem *sem);
 
 /* ----------------------------------------------------------------
  * Mutex
+ *
+ * Uses a non-recursive FreeRTOS mutex (which has priority inheritance)
+ * with manual re-entrancy tracking. This gives Zephyr-compatible
+ * behavior: re-entrant locking AND priority inheritance.
  * ---------------------------------------------------------------- */
 
 struct k_mutex {
     SemaphoreHandle_t handle;
     StaticSemaphore_t buffer;
+    TaskHandle_t      owner;    /* current owner for re-entrancy */
+    uint32_t          count;    /* recursion depth */
 #if defined(CONFIG_ZKERNEL_MUTEX_DEBUG)
     uint8_t  order;     /* lock ordering -- lower must be acquired first */
     uint32_t lock_time; /* tick count at lock acquisition */
@@ -182,6 +188,10 @@ uint32_t k_msgq_num_free_get(struct k_msgq *msgq);
 
 /* ----------------------------------------------------------------
  * Event
+ *
+ * BEHAVIORAL DELTA: FreeRTOS EventGroup reserves bits 24-31 for
+ * internal use. Only bits 0-23 (24 bits) are available, vs
+ * Zephyr's full 32 bits.
  * ---------------------------------------------------------------- */
 
 struct k_event {
@@ -203,6 +213,11 @@ uint32_t k_event_wait_all(struct k_event *event, uint32_t events,
 
 /* ----------------------------------------------------------------
  * Timer (over esp_timer)
+ *
+ * BEHAVIORAL DELTA: Timer expiry callbacks run in the ESP_TIMER_TASK
+ * context (a normal FreeRTOS task), not in ISR context as in Zephyr.
+ * This means callbacks CAN call blocking APIs, but they ARE
+ * preemptible by higher-priority tasks.
  * ---------------------------------------------------------------- */
 
 struct k_timer;
@@ -307,7 +322,14 @@ void k_work_queue_init(struct k_work_queue *queue);
 void k_work_queue_start(struct k_work_queue *queue, const char *name,
                         uint32_t stack_size, int prio);
 
-/* System work queue -- initialized at boot */
+/**
+ * System work queue.
+ *
+ * BEHAVIORAL DELTA: Unlike Zephyr, the system work queue is NOT
+ * automatically initialized at boot. Call k_work_queue_init() and
+ * k_work_queue_start() from app_main() or SYS_INIT before using
+ * k_work_submit().
+ */
 extern struct k_work_queue k_sys_work_q;
 
 /* ----------------------------------------------------------------
@@ -315,8 +337,9 @@ extern struct k_work_queue k_sys_work_q;
  * ---------------------------------------------------------------- */
 
 struct k_work_delayable {
-    struct k_work  work;
-    struct k_timer timer;
+    struct k_work        work;
+    struct k_timer       timer;
+    struct k_work_queue *queue;  /* target queue (NULL = system queue) */
 };
 
 #define K_WORK_DELAYABLE_DEFINE(name, _handler) \
@@ -362,14 +385,23 @@ struct k_thread {
 
 #define K_THREAD_STACK_SIZEOF(stack) (sizeof(stack))
 
+typedef TaskHandle_t k_tid_t;
+
 void k_thread_create(struct k_thread *thread, StackType_t *stack,
                      size_t stack_size, k_thread_entry_t entry,
                      void *p1, void *p2, void *p3,
                      int prio, uint32_t options, k_timeout_t delay);
 void k_thread_name_set(struct k_thread *thread, const char *name);
 void k_thread_abort(struct k_thread *thread);
+void k_thread_suspend(struct k_thread *thread);
+void k_thread_resume(struct k_thread *thread);
 int  k_thread_join(struct k_thread *thread, k_timeout_t timeout);
 int  k_thread_stack_space_get(struct k_thread *thread, size_t *unused);
+
+static inline k_tid_t k_current_get(void)
+{
+    return xTaskGetCurrentTaskHandle();
+}
 
 #ifdef __cplusplus
 }

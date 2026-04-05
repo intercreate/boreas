@@ -19,7 +19,7 @@ static void k_timer_esp_callback(void *arg)
         esp_timer_start_periodic(timer->handle, timer->period_us);
     }
 
-    timer->status++;
+    __atomic_fetch_add(&timer->status, 1, __ATOMIC_RELAXED);
     if (timer->expiry_fn) {
         timer->expiry_fn(timer);
     }
@@ -60,8 +60,12 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration,
     timer->status = 0;
     timer->first_interval_pending = false;
 
-    uint64_t duration_us = (uint64_t)k_timeout_to_ticks(duration)
-                           * portTICK_PERIOD_MS * 1000;
+    if (timer->handle == NULL) {
+        ESP_LOGE(TAG, "Timer not initialized");
+        return;
+    }
+
+    uint64_t duration_us = k_timeout_to_us(duration);
 
     if (k_timeout_is_no_wait(period)) {
         /* One-shot */
@@ -72,8 +76,7 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration,
         }
     } else {
         /* Periodic */
-        uint64_t period_us = (uint64_t)k_timeout_to_ticks(period)
-                             * portTICK_PERIOD_MS * 1000;
+        uint64_t period_us = k_timeout_to_us(period);
 
         if (duration_us != period_us) {
             /* Different first interval: use start_once for the first expiry,
@@ -110,15 +113,13 @@ void k_timer_stop(struct k_timer *timer)
 
 uint32_t k_timer_status_get(struct k_timer *timer)
 {
-    uint32_t status = timer->status;
-    timer->status = 0;
-    return status;
+    return __atomic_exchange_n(&timer->status, 0, __ATOMIC_RELAXED);
 }
 
 uint32_t k_timer_status_sync(struct k_timer *timer)
 {
     /* Block until at least one expiry. Simple polling approach. */
-    while (timer->running && timer->status == 0) {
+    while (timer->running && __atomic_load_n(&timer->status, __ATOMIC_RELAXED) == 0) {
         k_msleep(1);
     }
     return k_timer_status_get(timer);

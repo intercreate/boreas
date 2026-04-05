@@ -5,6 +5,8 @@
 
 #include "zephyr/kernel.h"
 
+#include <errno.h>
+
 #include "esp_log.h"
 
 static const char *TAG = "k_event";
@@ -14,7 +16,7 @@ int k_event_init(struct k_event *event)
     event->handle = xEventGroupCreateStatic(&event->buffer);
     if (event->handle == NULL) {
         ESP_LOGE(TAG, "Failed to create event group");
-        return -1;
+        return -ENOMEM;
     }
     return 0;
 }
@@ -41,6 +43,10 @@ uint32_t k_event_set(struct k_event *event, uint32_t events)
 
 uint32_t k_event_clear(struct k_event *event, uint32_t events)
 {
+    if (xPortInIsrContext()) {
+        return (uint32_t)xEventGroupClearBitsFromISR(event->handle,
+                                                      (EventBits_t)events);
+    }
     return (uint32_t)xEventGroupClearBits(event->handle, (EventBits_t)events);
 }
 

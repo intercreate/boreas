@@ -5,6 +5,8 @@
 
 #include "zephyr/kernel.h"
 
+#include <errno.h>
+
 #include "esp_log.h"
 
 static const char *TAG = "k_thread";
@@ -63,6 +65,20 @@ void k_thread_abort(struct k_thread *thread)
     }
 }
 
+void k_thread_suspend(struct k_thread *thread)
+{
+    if (thread->handle != NULL) {
+        vTaskSuspend(thread->handle);
+    }
+}
+
+void k_thread_resume(struct k_thread *thread)
+{
+    if (thread->handle != NULL) {
+        vTaskResume(thread->handle);
+    }
+}
+
 int k_thread_join(struct k_thread *thread, k_timeout_t timeout)
 {
     /* FreeRTOS doesn't have native join. Poll eTaskGetState. */
@@ -76,7 +92,7 @@ int k_thread_join(struct k_thread *thread, k_timeout_t timeout)
             return 0;
         }
         if (!forever && xTaskGetTickCount() >= deadline) {
-            return -1; /* timeout */
+            return -EAGAIN;
         }
         k_msleep(10);
     }
@@ -86,7 +102,7 @@ int k_thread_join(struct k_thread *thread, k_timeout_t timeout)
 int k_thread_stack_space_get(struct k_thread *thread, size_t *unused)
 {
     if (thread->handle == NULL) {
-        return -1;
+        return -EINVAL;
     }
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(thread->handle);
     *unused = (size_t)(hwm * sizeof(StackType_t));

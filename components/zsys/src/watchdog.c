@@ -58,8 +58,7 @@ int zsys_watchdog_register(struct zsys_watchdog_entry *entry,
     }
 
     entry->name = name;
-    entry->timeout_ms = (int64_t)k_timeout_to_ticks(timeout)
-                        * portTICK_PERIOD_MS;
+    entry->timeout_ms = k_timeout_to_ms(timeout);
     entry->last_feed_ms = k_uptime_get();
     entry->active = true;
 

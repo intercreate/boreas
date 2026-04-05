@@ -5,6 +5,8 @@
 
 #include "zephyr/kernel.h"
 
+#include <errno.h>
+
 #include "esp_log.h"
 
 static const char *TAG = "k_work";
@@ -40,11 +42,12 @@ static void k_work_queue_thread(void *p1)
         if (xQueueReceive(queue->queue, &work, portMAX_DELAY) == pdTRUE) {
             /* A cancelled item may still be in the queue (QUEUED flag cleared
              * but not removable from FreeRTOS queue). Skip it silently. */
-            if (work && work->handler && (work->flags & K_WORK_QUEUED)) {
-                work->flags |= K_WORK_RUNNING;
-                work->flags &= ~K_WORK_QUEUED;
+            if (work && work->handler &&
+                (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_QUEUED)) {
+                __atomic_or_fetch(&work->flags, K_WORK_RUNNING, __ATOMIC_RELAXED);
+                __atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
                 work->handler(work);
-                work->flags &= ~K_WORK_RUNNING;
+                __atomic_and_fetch(&work->flags, ~K_WORK_RUNNING, __ATOMIC_RELAXED);
             }
         }
     }
@@ -65,12 +68,12 @@ void k_work_init(struct k_work *work, k_work_handler_t handler)
 static int k_work_submit_internal(struct k_work_queue *queue,
                                   struct k_work *work)
 {
-    if (work->flags & K_WORK_QUEUED) {
+    if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_QUEUED) {
         /* Already queued -- idempotent */
         return 1;
     }
 
-    work->flags |= K_WORK_QUEUED;
+    __atomic_or_fetch(&work->flags, K_WORK_QUEUED, __ATOMIC_RELAXED);
 
     BaseType_t ret;
     if (xPortInIsrContext()) {
@@ -80,13 +83,13 @@ static int k_work_submit_internal(struct k_work_queue *queue,
             portYIELD_FROM_ISR(wake);
         }
     } else {
-        ret = xQueueSendToBack(queue->queue, &work, pdMS_TO_TICKS(20));
+        ret = xQueueSendToBack(queue->queue, &work, 0);
     }
 
     if (ret != pdTRUE) {
-        work->flags &= ~K_WORK_QUEUED;
+        __atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
         ESP_LOGW(TAG, "Work queue full");
-        return -1;
+        return -ENOSPC;
     }
     return 0;
 }
@@ -95,7 +98,7 @@ int k_work_submit(struct k_work *work)
 {
     if (!sys_wq_initialized) {
         ESP_LOGE(TAG, "System work queue not initialized");
-        return -1;
+        return -EINVAL;
     }
     return k_work_submit_internal(&k_sys_work_q, work);
 }
@@ -107,16 +110,17 @@ int k_work_submit_to_queue(struct k_work_queue *queue, struct k_work *work)
 
 bool k_work_cancel(struct k_work *work)
 {
-    if (work->flags & K_WORK_RUNNING) {
+    if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_RUNNING) {
         return false; /* Can't cancel while running */
     }
-    work->flags &= ~K_WORK_QUEUED;
+    __atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
     return true;
 }
 
 bool k_work_is_pending(struct k_work *work)
 {
-    return (work->flags & (K_WORK_QUEUED | K_WORK_RUNNING)) != 0;
+    return (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) &
+            (K_WORK_QUEUED | K_WORK_RUNNING)) != 0;
 }
 
 /* ----------------------------------------------------------------
@@ -166,7 +170,11 @@ static void k_work_delayable_timer_expiry(struct k_timer *timer)
 {
     struct k_work_delayable *dwork =
         CONTAINER_OF(timer, struct k_work_delayable, timer);
-    k_work_submit(&dwork->work);
+    if (dwork->queue) {
+        k_work_submit_to_queue(dwork->queue, &dwork->work);
+    } else {
+        k_work_submit(&dwork->work);
+    }
 }
 
 void k_work_init_delayable(struct k_work_delayable *dwork,
@@ -174,6 +182,7 @@ void k_work_init_delayable(struct k_work_delayable *dwork,
 {
     k_work_init(&dwork->work, handler);
     k_timer_init(&dwork->timer, k_work_delayable_timer_expiry, NULL);
+    dwork->queue = NULL;
 }
 
 int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay)
@@ -188,6 +197,8 @@ int k_work_schedule_for_queue(struct k_work_queue *queue,
     if (k_work_is_pending(&dwork->work)) {
         return 0; /* Already scheduled */
     }
+
+    dwork->queue = queue;
 
     if (k_timeout_is_no_wait(delay)) {
         return k_work_submit_to_queue(queue, &dwork->work);
