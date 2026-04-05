@@ -50,9 +50,10 @@ static void k_work_queue_thread(void *p1)
                 __atomic_and_fetch(&work->flags, ~K_WORK_RUNNING, __ATOMIC_RELAXED);
 
                 /* Signal any flush waiter */
-                struct k_work_sync *sync = work->sync;
+                struct k_work_sync *sync =
+                    __atomic_load_n(&work->sync, __ATOMIC_ACQUIRE);
                 if (sync) {
-                    work->sync = NULL;
+                    __atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
                     k_sem_give(&sync->sem);
                 }
             }
@@ -137,10 +138,10 @@ int k_work_flush(struct k_work *work, struct k_work_sync *sync)
      * if work finishes between our check and sem_take, the worker
      * thread will have already signaled the semaphore. */
     k_sem_init(&sync->sem, 0, 1);
-    work->sync = sync;
+    __atomic_store_n(&work->sync, sync, __ATOMIC_RELEASE);
 
     if (!k_work_is_pending(work)) {
-        work->sync = NULL;
+        __atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
         return 0; /* Nothing to flush */
     }
 
@@ -152,7 +153,7 @@ int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync)
 {
     /* Set up sync BEFORE cancelling to avoid TOCTOU race */
     k_sem_init(&sync->sem, 0, 1);
-    work->sync = sync;
+    __atomic_store_n(&work->sync, sync, __ATOMIC_RELEASE);
 
     /* Try to cancel (clears QUEUED flag) */
     k_work_cancel(work);
@@ -162,7 +163,7 @@ int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync)
         return k_sem_take(&sync->sem, K_FOREVER);
     }
 
-    work->sync = NULL;
+    __atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
     return 0;
 }
 

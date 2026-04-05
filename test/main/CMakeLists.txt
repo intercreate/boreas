@@ -22,6 +22,7 @@ if(NOT "${target}" STREQUAL "linux")
         "test_sleep.c"
         "test_k_thread.c"
         "test_k_mutex_pi.c"
+        "test_k_event_mt.c"
     )
 endif()
 

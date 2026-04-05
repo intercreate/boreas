@@ -36,10 +36,10 @@ static void shell_vfprintf_color(const struct shell *sh, const char *color,
     }
 
     /* Format message */
-    int len = vsnprintf(ctx->printf_buff + offset,
-                        CONFIG_ZSHELL_PRINTF_BUFF_SIZE - offset, fmt, args);
+    size_t avail = CONFIG_ZSHELL_PRINTF_BUFF_SIZE - offset;
+    int len = vsnprintf(ctx->printf_buff + offset, avail, fmt, args);
     if (len > 0) {
-        offset += (size_t)len;
+        offset += ((size_t)len < avail) ? (size_t)len : (avail > 0 ? avail - 1 : 0);
     }
 
     /* Color reset */

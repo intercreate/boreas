@@ -21,18 +21,21 @@ struct led_driver_api {
 
 static inline esp_err_t led_on(const struct device *dev)
 {
+    __ASSERT(device_is_ready(dev), "led_on: device not ready");
     const struct led_driver_api *api = dev->api;
     return api->enable(dev);
 }
 
 static inline esp_err_t led_off(const struct device *dev)
 {
+    __ASSERT(device_is_ready(dev), "led_off: device not ready");
     const struct led_driver_api *api = dev->api;
     return api->disable(dev);
 }
 
 static inline esp_err_t led_set_brightness(const struct device *dev, uint32_t channel, uint8_t value)
 {
+    __ASSERT(device_is_ready(dev), "led_set_brightness: device not ready");
     const struct led_driver_api *api = dev->api;
     return api->set_brightness(dev, channel, value);
 }
@@ -40,6 +43,7 @@ static inline esp_err_t led_set_brightness(const struct device *dev, uint32_t ch
 static inline esp_err_t led_write_channels(const struct device *dev, uint32_t start,
                                            uint32_t count, const uint8_t *buf)
 {
+    __ASSERT(device_is_ready(dev), "led_write_channels: device not ready");
     const struct led_driver_api *api = dev->api;
     return api->write_channels(dev, start, count, buf);
 }

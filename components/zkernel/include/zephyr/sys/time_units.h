@@ -42,7 +42,8 @@ static inline TickType_t k_timeout_to_ticks(k_timeout_t timeout)
     return (ticks > 0) ? ticks : 1; /* at least 1 tick for non-zero timeout */
 }
 
-/** Convert timeout to microseconds (for esp_timer — lossless). */
+/** Convert timeout to microseconds (for esp_timer — lossless for finite values).
+ *  K_FOREVER and K_NO_WAIT both return 0 (esp_timer cannot express "forever"). */
 static inline uint64_t k_timeout_to_us(k_timeout_t timeout)
 {
     if (timeout.us <= 0) {

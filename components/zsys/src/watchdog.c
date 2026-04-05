@@ -15,6 +15,7 @@ LOG_MODULE_REGISTER(watchdog, LOG_LEVEL_INF);
 static struct zsys_watchdog_entry *entries[CONFIG_ZSYS_WATCHDOG_MAX_ENTRIES];
 static int entry_count = 0;
 static zsys_watchdog_timeout_cb_t timeout_callback = NULL;
+static portMUX_TYPE wdt_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 static struct k_timer supervisor_timer;
 
@@ -28,7 +29,10 @@ static void supervisor_check(struct k_timer *timer)
         if (!entry->active) {
             continue;
         }
-        int64_t elapsed = now - entry->last_feed_ms;
+        portENTER_CRITICAL(&wdt_spinlock);
+        int64_t last_feed = entry->last_feed_ms;
+        portEXIT_CRITICAL(&wdt_spinlock);
+        int64_t elapsed = now - last_feed;
         if (elapsed > entry->timeout_ms) {
             LOG_ERR("Watchdog timeout: %s (elapsed=%lld ms, limit=%lld ms)",
                      entry->name, (long long)elapsed,
@@ -70,7 +74,9 @@ int zsys_watchdog_register(struct zsys_watchdog_entry *entry,
 
 void zsys_watchdog_feed(struct zsys_watchdog_entry *entry)
 {
+    portENTER_CRITICAL(&wdt_spinlock);
     entry->last_feed_ms = k_uptime_get();
+    portEXIT_CRITICAL(&wdt_spinlock);
 }
 
 #else /* !CONFIG_ZSYS_WATCHDOG */

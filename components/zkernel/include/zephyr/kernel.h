@@ -83,10 +83,12 @@ static inline void k_msleep(int32_t ms)
 
 static inline void k_sleep(k_timeout_t timeout)
 {
-    if (!k_timeout_is_forever(timeout) && !k_timeout_is_no_wait(timeout)) {
-        vTaskDelay(k_timeout_to_ticks(timeout));
+    if (k_timeout_is_no_wait(timeout)) {
+        taskYIELD();
     } else if (k_timeout_is_forever(timeout)) {
         vTaskDelay(portMAX_DELAY);
+    } else {
+        vTaskDelay(k_timeout_to_ticks(timeout));
     }
 }
 
@@ -246,8 +248,15 @@ void     k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn,
 void     k_timer_start(struct k_timer *timer, k_timeout_t duration,
                        k_timeout_t period);
 void     k_timer_stop(struct k_timer *timer);
+
+/** Read and reset the timer expiration count since last read.
+ *  Non-blocking. Returns 0 if no expirations since last call. */
 uint32_t k_timer_status_get(struct k_timer *timer);
+
+/** Block until the timer next expires, then return and reset the count.
+ *  Returns 0 immediately if the timer is stopped. */
 uint32_t k_timer_status_sync(struct k_timer *timer);
+
 int64_t  k_timer_remaining_get(struct k_timer *timer);
 void     k_timer_user_data_set(struct k_timer *timer, void *user_data);
 void    *k_timer_user_data_get(struct k_timer *timer);
@@ -385,7 +394,10 @@ struct k_thread {
     struct k_timer    _delay_timer;     /* used for finite-delay start */
 };
 
-/* Priority helpers -- map to FreeRTOS priority scheme */
+/* Priority helpers -- map to FreeRTOS priority scheme.
+ * FreeRTOS does not distinguish cooperative vs preemptible threads,
+ * so both macros map identically (higher number = higher priority).
+ * In real Zephyr, cooperative threads have negative priority values. */
 #define K_PRIO_PREEMPT(p) (configMAX_PRIORITIES - 1 - (p))
 #define K_PRIO_COOP(p)    (configMAX_PRIORITIES - 1 - (p))
 

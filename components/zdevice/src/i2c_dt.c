@@ -113,7 +113,9 @@ esp_err_t i2c_reg_read_byte_dt(const struct i2c_dt_spec *spec, uint8_t reg, uint
 
 esp_err_t i2c_burst_write_dt(const struct i2c_dt_spec *spec, uint8_t reg, const uint8_t *buf, size_t len)
 {
-    __ASSERT(len <= I2C_BURST_WRITE_MAX, "i2c_burst_write_dt: len exceeds max");
+    if (len > I2C_BURST_WRITE_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     uint8_t tx[1 + I2C_BURST_WRITE_MAX];
     tx[0] = reg;

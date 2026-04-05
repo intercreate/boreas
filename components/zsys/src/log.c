@@ -135,7 +135,7 @@ enum log_mode {
 };
 
 static volatile enum log_mode _log_mode = LOG_MODE_SYNC;
-static volatile uint32_t _log_dropped_count = 0;
+static uint32_t _log_dropped_count = 0;
 
 /* -------------------------------------------------------------------------
  * Deferred mode resources (compiled only when enabled)
@@ -256,7 +256,7 @@ void zsys_log_msg_emit(uint8_t level, const char *module,
 #if defined(CONFIG_ZSYS_LOG_MODE_DEFERRED)
     case LOG_MODE_DEFERRED:
         if (k_msgq_put(&_zsys_log_msgq, &msg, K_NO_WAIT) != 0) {
-            _log_dropped_count++;
+            __atomic_fetch_add(&_log_dropped_count, 1, __ATOMIC_RELAXED);
         }
         break;
 #endif
@@ -283,12 +283,12 @@ int zsys_log_init(void)
     k_msgq_init(&_zsys_log_msgq, (char *)_zsys_log_msgq.storage,
                 sizeof(struct log_msg), CONFIG_ZSYS_LOG_BUFFER_COUNT);
 
+    _log_mode = LOG_MODE_DEFERRED;
+
     k_thread_create(&_log_thread, _log_thread_stack,
                     CONFIG_ZSYS_LOG_THREAD_STACK_SIZE,
                     log_output_thread, NULL, NULL, NULL,
                     CONFIG_ZSYS_LOG_THREAD_PRIORITY, 0, K_NO_WAIT);
-
-    _log_mode = LOG_MODE_DEFERRED;
     ESP_LOGI(TAG, "Deferred logging started (queue=%d, stack=%d)",
              CONFIG_ZSYS_LOG_BUFFER_COUNT, CONFIG_ZSYS_LOG_THREAD_STACK_SIZE);
 #else
@@ -321,7 +321,7 @@ void zsys_log_panic(void)
 
 uint32_t zsys_log_get_dropped_count(void)
 {
-    return _log_dropped_count;
+    return __atomic_load_n(&_log_dropped_count, __ATOMIC_RELAXED);
 }
 
 /* -------------------------------------------------------------------------
@@ -354,7 +354,7 @@ void zsys_log_hexdump(uint8_t level, const char *module,
 
     /* Format 16 bytes per line */
     for (size_t offset = 0; offset < len; offset += 16) {
-        char line[64];
+        char line[80];
         int pos = 0;
         size_t row_len = (len - offset > 16) ? 16 : (len - offset);
 

@@ -88,6 +88,42 @@ static void test_event_wait_with_reset(void)
     TEST_ASSERT_EQUAL(EVT_B, got & EVT_B);
 }
 
+static void test_event_wait_timeout(void)
+{
+    struct k_event evt;
+    k_event_init(&evt);
+
+    /* Wait for a bit that is NOT set -- should return 0 (timeout) */
+    uint32_t got = k_event_wait(&evt, EVT_A, false, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(0, got);
+}
+
+static void test_event_set_clear_all(void)
+{
+    struct k_event evt;
+    k_event_init(&evt);
+
+    k_event_set(&evt, EVT_A | EVT_B | EVT_C);
+    k_event_clear(&evt, EVT_A | EVT_B | EVT_C);
+
+    /* All cleared -- wait should return 0 */
+    uint32_t got = k_event_wait(&evt, EVT_A | EVT_B | EVT_C, false, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(0, got);
+}
+
+static void test_event_set_overlapping(void)
+{
+    struct k_event evt;
+    k_event_init(&evt);
+
+    /* Set A, then set A|B -- A should still be set */
+    k_event_set(&evt, EVT_A);
+    k_event_set(&evt, EVT_A | EVT_B);
+
+    uint32_t got = k_event_wait_all(&evt, EVT_A | EVT_B, false, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(EVT_A | EVT_B, got);
+}
+
 void test_k_event_group(void)
 {
     RUN_TEST(test_event_set_and_wait);
@@ -96,4 +132,7 @@ void test_k_event_group(void)
     RUN_TEST(test_event_clear);
     RUN_TEST(test_event_post);
     RUN_TEST(test_event_wait_with_reset);
+    RUN_TEST(test_event_wait_timeout);
+    RUN_TEST(test_event_set_clear_all);
+    RUN_TEST(test_event_set_overlapping);
 }
