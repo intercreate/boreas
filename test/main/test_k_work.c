@@ -7,16 +7,6 @@
 #include "zephyr/kernel.h"
 
 static volatile int work_executed;
-static bool sys_wq_started = false;
-
-static void ensure_sys_work_queue(void)
-{
-    if (!sys_wq_started) {
-        k_work_queue_init(&k_sys_work_q);
-        k_work_queue_start(&k_sys_work_q, "sys_wq", 4096, 5);
-        sys_wq_started = true;
-    }
-}
 
 static void test_work_handler(struct k_work *work)
 {
@@ -26,7 +16,6 @@ static void test_work_handler(struct k_work *work)
 
 static void test_work_submit(void)
 {
-    ensure_sys_work_queue();
 
     struct k_work work;
     k_work_init(&work, test_work_handler);
@@ -39,7 +28,6 @@ static void test_work_submit(void)
 
 static void test_work_submit_idempotent(void)
 {
-    ensure_sys_work_queue();
 
     struct k_work work;
     k_work_init(&work, test_work_handler);
@@ -70,7 +58,6 @@ static void test_work_is_pending(void)
 
 static void test_work_delayable(void)
 {
-    ensure_sys_work_queue();
 
     struct k_work_delayable dwork;
     k_work_init_delayable(&dwork, test_work_handler);
@@ -88,7 +75,6 @@ static void test_work_delayable(void)
 
 static void test_work_cancel_delayable(void)
 {
-    ensure_sys_work_queue();
 
     struct k_work_delayable dwork;
     k_work_init_delayable(&dwork, test_work_handler);
@@ -104,7 +90,6 @@ static void test_work_cancel_delayable(void)
 
 static void test_work_reschedule(void)
 {
-    ensure_sys_work_queue();
 
     struct k_work_delayable dwork;
     k_work_init_delayable(&dwork, test_work_handler);
@@ -122,7 +107,6 @@ static void test_work_reschedule(void)
 
 static void test_work_delayable_remaining(void)
 {
-    ensure_sys_work_queue();
 
     struct k_work_delayable dwork;
     k_work_init_delayable(&dwork, test_work_handler);
@@ -148,7 +132,6 @@ static void custom_wq_handler(struct k_work *work)
 
 static void test_work_submit_to_queue(void)
 {
-    ensure_sys_work_queue();
 
     struct k_work work;
     k_work_init(&work, custom_wq_handler);
@@ -158,6 +141,44 @@ static void test_work_submit_to_queue(void)
     TEST_ASSERT_EQUAL(0, k_work_submit_to_queue(&k_sys_work_q, &work));
     k_msleep(100);
     TEST_ASSERT_EQUAL(1, custom_wq_executed);
+}
+
+static volatile int slow_work_done;
+
+static void slow_work_handler(struct k_work *work)
+{
+    (void)work;
+    k_msleep(200);
+    slow_work_done = 1;
+}
+
+static void test_work_flush(void)
+{
+    struct k_work work;
+    k_work_init(&work, slow_work_handler);
+    slow_work_done = 0;
+
+    k_work_submit(&work);
+
+    /* Flush should block until handler finishes (~200ms) */
+    struct k_work_sync sync;
+    int64_t start = k_uptime_get();
+    k_work_flush(&work, &sync);
+    int64_t elapsed = k_uptime_get() - start;
+
+    TEST_ASSERT_EQUAL(1, slow_work_done);
+    TEST_ASSERT_GREATER_OR_EQUAL(100, elapsed);
+}
+
+static void test_work_flush_not_pending(void)
+{
+    struct k_work work;
+    k_work_init(&work, test_work_handler);
+
+    /* Flush on non-pending work should return immediately */
+    struct k_work_sync sync;
+    int ret = k_work_flush(&work, &sync);
+    TEST_ASSERT_EQUAL(0, ret);
 }
 
 void test_k_work_group(void)
@@ -171,4 +192,6 @@ void test_k_work_group(void)
     RUN_TEST(test_work_reschedule);
     RUN_TEST(test_work_delayable_remaining);
     RUN_TEST(test_work_submit_to_queue);
+    RUN_TEST(test_work_flush);
+    RUN_TEST(test_work_flush_not_pending);
 }

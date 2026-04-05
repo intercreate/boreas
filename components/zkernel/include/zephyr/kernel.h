@@ -259,10 +259,15 @@ void    *k_timer_user_data_get(struct k_timer *timer);
 struct k_work;
 typedef void (*k_work_handler_t)(struct k_work *work);
 
+struct k_work_sync {
+    struct k_sem sem;
+};
+
 struct k_work {
     k_work_handler_t handler;
     sys_dnode_t      node;     /* queue linkage */
     uint32_t         flags;
+    struct k_work_sync *sync;  /* non-NULL when a flush is pending */
 };
 
 struct k_work_queue {
@@ -317,6 +322,8 @@ int  k_work_submit_to_queue(struct k_work_queue *queue, struct k_work *work);
  */
 bool k_work_cancel(struct k_work *work);
 bool k_work_is_pending(struct k_work *work);
+int  k_work_flush(struct k_work *work, struct k_work_sync *sync);
+int  k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync);
 
 void k_work_queue_init(struct k_work_queue *queue);
 void k_work_queue_start(struct k_work_queue *queue, const char *name,
@@ -325,10 +332,10 @@ void k_work_queue_start(struct k_work_queue *queue, const char *name,
 /**
  * System work queue.
  *
- * BEHAVIORAL DELTA: Unlike Zephyr, the system work queue is NOT
- * automatically initialized at boot. Call k_work_queue_init() and
- * k_work_queue_start() from app_main() or SYS_INIT before using
- * k_work_submit().
+ * Auto-initialized before main() via constructor. Ready to use
+ * from app_main(), SYS_INIT callbacks, and other constructors that
+ * run after zkernel's constructor. k_work_queue_start() is idempotent,
+ * so explicit init calls are safe but unnecessary.
  */
 extern struct k_work_queue k_sys_work_q;
 
@@ -374,6 +381,8 @@ struct k_thread {
     void             *p1;
     void             *p2;
     void             *p3;
+    bool              _start_suspended; /* self-suspend before entry */
+    struct k_timer    _delay_timer;     /* used for finite-delay start */
 };
 
 /* Priority helpers -- map to FreeRTOS priority scheme */

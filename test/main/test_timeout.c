@@ -9,38 +9,38 @@
 static void test_k_msec(void)
 {
     k_timeout_t t = K_MSEC(100);
-    TEST_ASSERT_EQUAL(100, t.ms);
+    TEST_ASSERT_EQUAL(100000, t.us);  /* 100ms = 100000us */
 }
 
 static void test_k_seconds(void)
 {
     k_timeout_t t = K_SECONDS(2);
-    TEST_ASSERT_EQUAL(2000, t.ms);
+    TEST_ASSERT_EQUAL(2000000, t.us);
 }
 
 static void test_k_minutes(void)
 {
     k_timeout_t t = K_MINUTES(1);
-    TEST_ASSERT_EQUAL(60000, t.ms);
+    TEST_ASSERT_EQUAL(60000000, t.us);
 }
 
 static void test_k_usec(void)
 {
-    /* K_USEC rounds up to nearest millisecond */
+    /* K_USEC stores microseconds directly — no rounding */
     k_timeout_t t = K_USEC(5000);
-    TEST_ASSERT_EQUAL(5, t.ms);
+    TEST_ASSERT_EQUAL(5000, t.us);
 
-    /* Sub-ms rounds up to 1ms, not 0 (K_NO_WAIT) */
+    /* Sub-ms precision preserved */
     k_timeout_t t2 = K_USEC(500);
-    TEST_ASSERT_EQUAL(1, t2.ms);
+    TEST_ASSERT_EQUAL(500, t2.us);
     TEST_ASSERT_FALSE(k_timeout_is_no_wait(t2));
 }
 
 static void test_k_ticks(void)
 {
-    /* K_TICKS converts FreeRTOS ticks to ms */
+    /* K_TICKS converts FreeRTOS ticks to us */
     k_timeout_t t = K_TICKS(42);
-    TEST_ASSERT_EQUAL(42 * portTICK_PERIOD_MS, t.ms);
+    TEST_ASSERT_EQUAL(42 * portTICK_PERIOD_MS * 1000, t.us);
 }
 
 static void test_k_forever(void)
@@ -65,11 +65,20 @@ static void test_k_no_wait_is_not_forever(void)
 
 static void test_k_timeout_to_us(void)
 {
-    /* Lossless ms -> us conversion for esp_timer */
+    /* Lossless us access for esp_timer */
     TEST_ASSERT_EQUAL(15000, k_timeout_to_us(K_MSEC(15)));
+    TEST_ASSERT_EQUAL(500, k_timeout_to_us(K_USEC(500)));
     TEST_ASSERT_EQUAL(500000, k_timeout_to_us(K_MSEC(500)));
     TEST_ASSERT_EQUAL(0, k_timeout_to_us(K_NO_WAIT));
     TEST_ASSERT_EQUAL(0, k_timeout_to_us(K_FOREVER));
+}
+
+static void test_k_timeout_to_ms(void)
+{
+    TEST_ASSERT_EQUAL(100, k_timeout_to_ms(K_MSEC(100)));
+    TEST_ASSERT_EQUAL(0, k_timeout_to_ms(K_USEC(500)));  /* 500us < 1ms */
+    TEST_ASSERT_EQUAL(1, k_timeout_to_ms(K_USEC(1500))); /* 1500us = 1ms */
+    TEST_ASSERT_EQUAL(-1, k_timeout_to_ms(K_FOREVER));
 }
 
 static void test_k_timeout_eq(void)
@@ -78,6 +87,7 @@ static void test_k_timeout_eq(void)
     TEST_ASSERT_FALSE(K_TIMEOUT_EQ(K_MSEC(100), K_MSEC(200)));
     TEST_ASSERT_TRUE(K_TIMEOUT_EQ(K_FOREVER, K_FOREVER));
     TEST_ASSERT_TRUE(K_TIMEOUT_EQ(K_NO_WAIT, K_NO_WAIT));
+    TEST_ASSERT_TRUE(K_TIMEOUT_EQ(K_USEC(500), K_USEC(500)));
 }
 
 void test_timeout_group(void)
@@ -91,5 +101,6 @@ void test_timeout_group(void)
     RUN_TEST(test_k_no_wait);
     RUN_TEST(test_k_no_wait_is_not_forever);
     RUN_TEST(test_k_timeout_to_us);
+    RUN_TEST(test_k_timeout_to_ms);
     RUN_TEST(test_k_timeout_eq);
 }

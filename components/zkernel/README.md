@@ -16,18 +16,18 @@ Zephyr-compatible kernel primitives over FreeRTOS. All objects are statically al
 
 ## Timeout API
 
-Timeouts store **milliseconds** internally. Conversion to FreeRTOS ticks happens at the point of use, and conversion to microseconds for esp_timer is lossless.
+Timeouts store **microseconds** internally. Conversion to FreeRTOS ticks happens at the point of use (quantized to tick rate), and microsecond access for esp_timer is lossless.
 
 ```c
-K_MSEC(500)       // 500ms
-K_SECONDS(2)      // 2000ms
-K_USEC(1500)      // rounds up to 2ms
-K_NO_WAIT         // non-blocking (0ms)
-K_FOREVER         // block indefinitely
+K_USEC(500)       // 500us (lossless for esp_timer)
+K_MSEC(15)        // 15000us
+K_SECONDS(2)      // 2000000us
+K_NO_WAIT         // non-blocking (0)
+K_FOREVER         // block indefinitely (-1)
 
+k_timeout_to_us(t)     // direct microsecond value (lossless)
+k_timeout_to_ms(t)     // microseconds / 1000
 k_timeout_to_ticks(t)  // for FreeRTOS APIs (quantized to tick rate)
-k_timeout_to_us(t)     // for esp_timer (lossless)
-k_timeout_to_ms(t)     // raw millisecond value
 ```
 
 ## Semaphore (`k_sem`)
@@ -117,11 +117,7 @@ Backed by `esp_timer` for microsecond resolution (not limited by FreeRTOS tick r
 ## Work Queue (`k_work`)
 
 ```c
-// Initialize system work queue (required before k_work_submit)
-k_work_queue_init(&k_sys_work_q);
-k_work_queue_start(&k_sys_work_q, "sys_wq", 4096, 5);
-
-// Immediate work
+// Immediate work (system work queue is auto-initialized)
 struct k_work work;
 k_work_init(&work, my_handler);
 k_work_submit(&work);           // ISR-safe, non-blocking
@@ -132,11 +128,16 @@ k_work_init_delayable(&dwork, my_handler);
 k_work_schedule(&dwork, K_SECONDS(2));
 k_work_reschedule(&dwork, K_MSEC(500));  // cancel + reschedule
 k_work_cancel_delayable(&dwork);
+
+// Flush -- block until a running work item completes
+struct k_work_sync sync;
+k_work_flush(&work, &sync);
+
+// Cancel + wait for completion
+k_work_cancel_sync(&work, &sync);
 ```
 
-**BEHAVIORAL DELTA:** System work queue is NOT auto-initialized. Call `k_work_queue_start()` from `app_main()` or `SYS_INIT`.
-
-Custom work queues via `K_WORK_QUEUE_DEFINE(name, depth, stack_size)`.
+System work queue is auto-initialized before `main()` via constructor. Custom work queues via `K_WORK_QUEUE_DEFINE(name, depth, stack_size)`.
 
 ## Thread (`k_thread`)
 
@@ -144,9 +145,17 @@ Custom work queues via `K_WORK_QUEUE_DEFINE(name, depth, stack_size)`.
 K_THREAD_STACK_DEFINE(my_stack, 4096);
 struct k_thread my_thread;
 
+// Start immediately
 k_thread_create(&my_thread, my_stack, K_THREAD_STACK_SIZEOF(my_stack),
                 my_entry, arg1, arg2, arg3,
                 K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+
+// Start suspended -- must call k_thread_resume to begin
+k_thread_create(&my_thread, ..., K_FOREVER);
+k_thread_resume(&my_thread);
+
+// Start after delay (uses esp_timer internally)
+k_thread_create(&my_thread, ..., K_MSEC(500));
 
 k_thread_name_set(&my_thread, "worker");
 k_thread_join(&my_thread, K_FOREVER);
@@ -158,7 +167,7 @@ k_thread_stack_space_get(&my_thread, &unused);
 k_tid_t me = k_current_get();
 ```
 
-Thread entry takes 3 void* params (Zephyr convention). On return, thread suspends (safe for static TCBs).
+Thread entry takes 3 void* params (Zephyr convention). On return, thread suspends (safe for static TCBs). Deferred start uses self-suspend (race-free on dual-core ESP32).
 
 ## Uptime and Sleep
 
