@@ -126,8 +126,10 @@ extern size_t _shell_root_cmd_count;
     };                                                                 \
     static void __attribute__((constructor))                            \
     _shell_reg_##_syntax(void) {                                       \
-        _shell_root_cmds[_shell_root_cmd_count++] =                    \
-            &_shell_cmd_##_syntax;                                     \
+        if (_shell_root_cmd_count < CONFIG_ZSHELL_MAX_ROOT_CMDS) {     \
+            _shell_root_cmds[_shell_root_cmd_count++] =                \
+                &_shell_cmd_##_syntax;                                 \
+        }                                                              \
     }
 
 /**

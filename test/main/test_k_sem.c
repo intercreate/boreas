@@ -5,6 +5,7 @@
 
 #include "unity.h"
 #include "zephyr/kernel.h"
+#include <errno.h>
 
 static void test_sem_init_and_count(void)
 {
@@ -45,10 +46,49 @@ static void test_sem_reset(void)
     TEST_ASSERT_EQUAL(0, k_sem_count_get(&sem));
 }
 
+static void test_sem_give_at_limit(void)
+{
+    struct k_sem sem;
+    k_sem_init(&sem, 0, 3);
+
+    k_sem_give(&sem);
+    k_sem_give(&sem);
+    k_sem_give(&sem);
+    TEST_ASSERT_EQUAL(3, k_sem_count_get(&sem));
+
+    /* Give beyond limit -- FreeRTOS counting semaphore silently ignores */
+    k_sem_give(&sem);
+    TEST_ASSERT_EQUAL(3, k_sem_count_get(&sem));
+}
+
+static void test_sem_init_at_limit(void)
+{
+    struct k_sem sem;
+    k_sem_init(&sem, 5, 5);
+    TEST_ASSERT_EQUAL(5, k_sem_count_get(&sem));
+
+    /* Already at limit, give should not increase */
+    k_sem_give(&sem);
+    TEST_ASSERT_EQUAL(5, k_sem_count_get(&sem));
+}
+
+static void test_sem_take_no_wait_empty(void)
+{
+    struct k_sem sem;
+    k_sem_init(&sem, 0, 1);
+
+    /* K_NO_WAIT on empty should return -EBUSY */
+    int ret = k_sem_take(&sem, K_NO_WAIT);
+    TEST_ASSERT_EQUAL(-EBUSY, ret);
+}
+
 void test_k_sem_group(void)
 {
     RUN_TEST(test_sem_init_and_count);
     RUN_TEST(test_sem_give_and_take);
     RUN_TEST(test_sem_take_timeout);
     RUN_TEST(test_sem_reset);
+    RUN_TEST(test_sem_give_at_limit);
+    RUN_TEST(test_sem_init_at_limit);
+    RUN_TEST(test_sem_take_no_wait_empty);
 }

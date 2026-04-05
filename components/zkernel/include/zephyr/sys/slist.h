@@ -34,22 +34,22 @@ static inline void sys_slist_init(sys_slist_t *list)
     list->tail = NULL;
 }
 
-static inline bool sys_slist_is_empty(sys_slist_t *list)
+static inline bool sys_slist_is_empty(const sys_slist_t *list)
 {
     return list->head == NULL;
 }
 
-static inline sys_snode_t *sys_slist_peek_head(sys_slist_t *list)
+static inline sys_snode_t *sys_slist_peek_head(const sys_slist_t *list)
 {
     return list->head;
 }
 
-static inline sys_snode_t *sys_slist_peek_tail(sys_slist_t *list)
+static inline sys_snode_t *sys_slist_peek_tail(const sys_slist_t *list)
 {
     return list->tail;
 }
 
-static inline sys_snode_t *sys_slist_peek_next(sys_snode_t *node)
+static inline sys_snode_t *sys_slist_peek_next(const sys_snode_t *node)
 {
     return node->next;
 }
@@ -119,7 +119,7 @@ static inline bool sys_slist_find_and_remove(sys_slist_t *list,
     return false;
 }
 
-static inline size_t sys_slist_len(sys_slist_t *list)
+static inline size_t sys_slist_len(const sys_slist_t *list)
 {
     size_t count = 0;
     sys_snode_t *cur = list->head;

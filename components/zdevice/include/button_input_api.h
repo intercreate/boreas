@@ -35,6 +35,7 @@ struct button_input_api {
 static inline esp_err_t button_input_subscribe(const struct device *dev,
                                                struct button_input_entry *entry)
 {
+    __ASSERT(device_is_ready(dev), "button_input_subscribe: device not ready");
     const struct button_input_api *api = dev->api;
     return api->subscribe(dev, entry);
 }
@@ -42,6 +43,7 @@ static inline esp_err_t button_input_subscribe(const struct device *dev,
 static inline esp_err_t button_input_get_state(const struct device *dev,
                                                uint32_t *state)
 {
+    __ASSERT(device_is_ready(dev), "button_input_get_state: device not ready");
     const struct button_input_api *api = dev->api;
     return api->get_state(dev, state);
 }

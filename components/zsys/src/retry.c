@@ -39,9 +39,12 @@ k_timeout_t retry_next_delay(struct retry_ctx *ctx)
         if (delay_ms > ctx->max_delay_ms) {
             delay_ms = ctx->max_delay_ms;
         }
-        /* Add 0-25% random jitter */
+        /* Add 0-25% random jitter, then re-clamp */
         uint32_t jitter = (esp_random() % (delay_ms / 4 + 1));
         delay_ms += jitter;
+        if (delay_ms > ctx->max_delay_ms) {
+            delay_ms = ctx->max_delay_ms;
+        }
         break;
     }
 

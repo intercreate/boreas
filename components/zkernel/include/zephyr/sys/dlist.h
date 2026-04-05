@@ -35,29 +35,29 @@ static inline void sys_dlist_init(sys_dlist_t *list)
     list->head.prev = &list->head;
 }
 
-static inline bool sys_dlist_is_empty(sys_dlist_t *list)
+static inline bool sys_dlist_is_empty(const sys_dlist_t *list)
 {
     return list->head.next == &list->head;
 }
 
-static inline sys_dnode_t *sys_dlist_peek_head(sys_dlist_t *list)
+static inline sys_dnode_t *sys_dlist_peek_head(const sys_dlist_t *list)
 {
     return sys_dlist_is_empty(list) ? NULL : list->head.next;
 }
 
-static inline sys_dnode_t *sys_dlist_peek_tail(sys_dlist_t *list)
+static inline sys_dnode_t *sys_dlist_peek_tail(const sys_dlist_t *list)
 {
     return sys_dlist_is_empty(list) ? NULL : list->head.prev;
 }
 
-static inline sys_dnode_t *sys_dlist_peek_next(sys_dlist_t *list,
-                                               sys_dnode_t *node)
+static inline sys_dnode_t *sys_dlist_peek_next(const sys_dlist_t *list,
+                                               const sys_dnode_t *node)
 {
     return (node->next == &list->head) ? NULL : node->next;
 }
 
-static inline sys_dnode_t *sys_dlist_peek_prev(sys_dlist_t *list,
-                                               sys_dnode_t *node)
+static inline sys_dnode_t *sys_dlist_peek_prev(const sys_dlist_t *list,
+                                               const sys_dnode_t *node)
 {
     return (node->prev == &list->head) ? NULL : node->prev;
 }
@@ -109,12 +109,12 @@ static inline sys_dnode_t *sys_dlist_get(sys_dlist_t *list)
     return node;
 }
 
-static inline bool sys_dnode_is_linked(sys_dnode_t *node)
+static inline bool sys_dnode_is_linked(const sys_dnode_t *node)
 {
     return node->next != NULL;
 }
 
-static inline size_t sys_dlist_len(sys_dlist_t *list)
+static inline size_t sys_dlist_len(const sys_dlist_t *list)
 {
     size_t count = 0;
     sys_dnode_t *cur = list->head.next;
