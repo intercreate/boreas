@@ -5,6 +5,8 @@
 
 #include "zephyr/kernel.h"
 
+#include <errno.h>
+
 #include "esp_log.h"
 
 static const char *TAG = "k_sem";
@@ -16,7 +18,7 @@ int k_sem_init(struct k_sem *sem, unsigned int initial_count,
                                                  &sem->buffer);
     if (sem->handle == NULL) {
         ESP_LOGE(TAG, "Failed to create semaphore");
-        return -1;
+        return -ENOMEM;
     }
     return 0;
 }
@@ -25,7 +27,10 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 {
     BaseType_t ret = xSemaphoreTake(sem->handle,
                                     k_timeout_to_ticks(timeout));
-    return (ret == pdTRUE) ? 0 : -1;
+    if (ret == pdTRUE) {
+        return 0;
+    }
+    return k_timeout_is_no_wait(timeout) ? -EBUSY : -EAGAIN;
 }
 
 void k_sem_give(struct k_sem *sem)

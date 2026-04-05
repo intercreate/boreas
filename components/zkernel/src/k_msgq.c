@@ -5,6 +5,8 @@
 
 #include "zephyr/kernel.h"
 
+#include <errno.h>
+
 #include "esp_log.h"
 
 static const char *TAG = "k_msgq";
@@ -19,7 +21,7 @@ int k_msgq_init(struct k_msgq *msgq, char *buffer, size_t msg_size,
                                       &msgq->buffer);
     if (msgq->handle == NULL) {
         ESP_LOGE(TAG, "Failed to create message queue");
-        return -1;
+        return -ENOMEM;
     }
     return 0;
 }
@@ -38,7 +40,10 @@ int k_msgq_put(struct k_msgq *msgq, const void *data, k_timeout_t timeout)
         ret = xQueueSendToBack(msgq->handle, data,
                                k_timeout_to_ticks(timeout));
     }
-    return (ret == pdTRUE) ? 0 : -1;
+    if (ret == pdTRUE) {
+        return 0;
+    }
+    return k_timeout_is_no_wait(timeout) ? -ENOMSG : -EAGAIN;
 }
 
 int k_msgq_get(struct k_msgq *msgq, void *data, k_timeout_t timeout)
@@ -55,13 +60,16 @@ int k_msgq_get(struct k_msgq *msgq, void *data, k_timeout_t timeout)
         ret = xQueueReceive(msgq->handle, data,
                             k_timeout_to_ticks(timeout));
     }
-    return (ret == pdTRUE) ? 0 : -1;
+    if (ret == pdTRUE) {
+        return 0;
+    }
+    return k_timeout_is_no_wait(timeout) ? -ENOMSG : -EAGAIN;
 }
 
 int k_msgq_peek(struct k_msgq *msgq, void *data)
 {
     BaseType_t ret = xQueuePeek(msgq->handle, data, 0);
-    return (ret == pdTRUE) ? 0 : -1;
+    return (ret == pdTRUE) ? 0 : -ENOMSG;
 }
 
 void k_msgq_purge(struct k_msgq *msgq)

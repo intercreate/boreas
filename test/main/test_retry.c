@@ -15,8 +15,8 @@ static void test_retry_fixed(void)
     k_timeout_t d2 = retry_next_delay(&ctx);
     k_timeout_t d3 = retry_next_delay(&ctx);
 
-    TEST_ASSERT_EQUAL(d1.ticks, d2.ticks);
-    TEST_ASSERT_EQUAL(d2.ticks, d3.ticks);
+    TEST_ASSERT_EQUAL(d1.ms, d2.ms);
+    TEST_ASSERT_EQUAL(d2.ms, d3.ms);
     TEST_ASSERT_TRUE(retry_exhausted(&ctx));
 }
 
@@ -29,8 +29,8 @@ static void test_retry_exponential(void)
     k_timeout_t d2 = retry_next_delay(&ctx); /* 200ms */
     k_timeout_t d3 = retry_next_delay(&ctx); /* 400ms */
 
-    TEST_ASSERT_TRUE(d2.ticks > d1.ticks);
-    TEST_ASSERT_TRUE(d3.ticks > d2.ticks);
+    TEST_ASSERT_TRUE(d2.ms > d1.ms);
+    TEST_ASSERT_TRUE(d3.ms > d2.ms);
 }
 
 static void test_retry_exhausted(void)
@@ -69,11 +69,11 @@ static void test_retry_exp_jitter(void)
     k_timeout_t d2 = retry_next_delay(&ctx);
 
     /* Jitter adds 0-25%, so d1 should be 100-125 ticks-equivalent */
-    TEST_ASSERT_GREATER_OR_EQUAL(K_MSEC(100).ticks, d1.ticks);
-    TEST_ASSERT_LESS_OR_EQUAL(K_MSEC(126).ticks, d1.ticks);
+    TEST_ASSERT_GREATER_OR_EQUAL(K_MSEC(100).ms, d1.ms);
+    TEST_ASSERT_LESS_OR_EQUAL(K_MSEC(126).ms, d1.ms);
 
     /* d2 base is 200ms + jitter, should be > d1 base of 100 */
-    TEST_ASSERT_GREATER_OR_EQUAL(K_MSEC(200).ticks, d2.ticks);
+    TEST_ASSERT_GREATER_OR_EQUAL(K_MSEC(200).ms, d2.ms);
 }
 
 static void test_retry_max_delay_cap(void)
@@ -89,8 +89,8 @@ static void test_retry_max_delay_cap(void)
     k_timeout_t d5 = retry_next_delay(&ctx);
 
     /* Should be capped at max_delay */
-    TEST_ASSERT_EQUAL(K_MSEC(5000).ticks, d4.ticks);
-    TEST_ASSERT_EQUAL(K_MSEC(5000).ticks, d5.ticks);
+    TEST_ASSERT_EQUAL(K_MSEC(5000).ms, d4.ms);
+    TEST_ASSERT_EQUAL(K_MSEC(5000).ms, d5.ms);
 }
 
 void test_retry_group(void)
