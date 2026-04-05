@@ -15,10 +15,10 @@
  *   5. Using CONTAINER_OF to access context from a work handler
  */
 
-#include "esp_log.h"
 #include "zephyr/kernel.h"
+#include "zsys/log.h"
 
-static const char *TAG = "demo";
+LOG_MODULE_REGISTER(demo, LOG_LEVEL_INF);
 
 /* -------------------------------------------------------------------
  * Example 1: Periodic timer with expiry callback
@@ -29,12 +29,12 @@ static int heartbeat_count = 0;
 static void heartbeat_expiry(struct k_timer *timer)
 {
     heartbeat_count++;
-    ESP_LOGI(TAG, "[Timer] Heartbeat #%d", heartbeat_count);
+    LOG_INF("[Timer] Heartbeat #%d", heartbeat_count);
 }
 
 static void heartbeat_stop(struct k_timer *timer)
 {
-    ESP_LOGI(TAG, "[Timer] Heartbeat stopped after %d beats", heartbeat_count);
+    LOG_INF("[Timer] Heartbeat stopped after %d beats", heartbeat_count);
 }
 
 static struct k_timer heartbeat_timer;
@@ -52,7 +52,7 @@ struct sensor_work_ctx {
 static void sensor_work_handler(struct k_work *work)
 {
     struct sensor_work_ctx *ctx = CONTAINER_OF(work, struct sensor_work_ctx, work);
-    ESP_LOGI(TAG, "[Work] Processing sensor %d, reading=%d",
+    LOG_INF("[Work] Processing sensor %d, reading=%d",
              ctx->sensor_id, ctx->reading);
 }
 
@@ -64,7 +64,7 @@ static struct sensor_work_ctx sensor_ctx;
 
 static void delayed_handler(struct k_work *work)
 {
-    ESP_LOGI(TAG, "[Delayed] This ran 2 seconds after scheduling");
+    LOG_INF("[Delayed] This ran 2 seconds after scheduling");
 }
 
 static struct k_work_delayable delayed_work;
@@ -78,7 +78,7 @@ static int reschedule_count = 0;
 static void reschedule_handler(struct k_work *work)
 {
     reschedule_count++;
-    ESP_LOGI(TAG, "[Reschedule] Finally fired after %d reschedules",
+    LOG_INF("[Reschedule] Finally fired after %d reschedules",
              reschedule_count);
 }
 
@@ -90,37 +90,37 @@ static struct k_work_delayable reschedule_work;
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== Boreas Work Queue Demo ===");
+    LOG_INF("=== Boreas Work Queue Demo ===");
 
     /* Start the system work queue (required before submitting work) */
     k_work_queue_init(&k_sys_work_q);
     k_work_queue_start(&k_sys_work_q, "sys_wq", 4096, 5);
 
     /* --- Example 1: Periodic timer --- */
-    ESP_LOGI(TAG, "Starting heartbeat timer (every 1s, runs for 5s)...");
+    LOG_INF("Starting heartbeat timer (every 1s, runs for 5s)...");
     k_timer_init(&heartbeat_timer, heartbeat_expiry, heartbeat_stop);
     k_timer_start(&heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
 
     /* --- Example 2: Immediate work with context --- */
-    ESP_LOGI(TAG, "Submitting sensor work...");
+    LOG_INF("Submitting sensor work...");
     sensor_ctx.sensor_id = 7;
     sensor_ctx.reading = 2350;
     k_work_init(&sensor_ctx.work, sensor_work_handler);
     k_work_submit(&sensor_ctx.work);
 
     /* --- Example 3: Delayed work --- */
-    ESP_LOGI(TAG, "Scheduling delayed work (fires in 2s)...");
+    LOG_INF("Scheduling delayed work (fires in 2s)...");
     k_work_init_delayable(&delayed_work, delayed_handler);
     k_work_schedule(&delayed_work, K_SECONDS(2));
 
     /* --- Example 4: Reschedulable work --- */
-    ESP_LOGI(TAG, "Scheduling work for 5s, then rescheduling to 3s...");
+    LOG_INF("Scheduling work for 5s, then rescheduling to 3s...");
     k_work_init_delayable(&reschedule_work, reschedule_handler);
     k_work_schedule(&reschedule_work, K_SECONDS(5));
     k_msleep(500);
     /* Oops, changed our mind -- fire sooner */
     k_work_reschedule(&reschedule_work, K_SECONDS(3));
-    ESP_LOGI(TAG, "Rescheduled to 3s from now (3.5s total)");
+    LOG_INF("Rescheduled to 3s from now (3.5s total)");
 
     /* Let everything run */
     k_msleep(5500);
@@ -129,8 +129,8 @@ void app_main(void)
     k_timer_stop(&heartbeat_timer);
 
     /* Show timer status */
-    ESP_LOGI(TAG, "Timer remaining: %lld ms",
+    LOG_INF("Timer remaining: %lld ms",
              (long long)k_timer_remaining_get(&heartbeat_timer));
 
-    ESP_LOGI(TAG, "=== Demo complete ===");
+    LOG_INF("=== Demo complete ===");
 }

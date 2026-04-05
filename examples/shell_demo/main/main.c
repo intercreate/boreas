@@ -8,10 +8,9 @@
 
 #include "zephyr/kernel.h"
 #include "zshell/shell.h"
+#include "zsys/log.h"
 
-#include "esp_log.h"
-
-static const char *TAG = "shell_demo";
+LOG_MODULE_REGISTER(shell_demo, LOG_LEVEL_INF);
 
 /* ----------------------------------------------------------------
  * Custom application command: "app"
@@ -50,13 +49,13 @@ static struct shell demo_shell = {
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== Boreas Shell Demo ===");
+    LOG_INF("=== Boreas Shell Demo ===");
 
     /* Start the shell on UART */
     shell_init(&demo_shell, &shell_transport_uart, "boreas> ");
 
     /* Main task can do other work or just idle */
-    ESP_LOGI(TAG, "Shell started. Type 'help' for available commands.");
+    LOG_INF("Shell started. Type 'help' for available commands.");
 
     /* Keep main task alive */
     while (1) {

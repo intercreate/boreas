@@ -18,13 +18,12 @@
  * Change BLINK_GPIO below for your board.
  */
 
-#include "esp_log.h"
-
 #include "device_model.h"
 #include "gpio_dt.h"
 #include "zephyr/kernel.h"
+#include "zsys/log.h"
 
-static const char *TAG = "blink";
+LOG_MODULE_REGISTER(blink, LOG_LEVEL_INF);
 
 /* -------------------------------------------------------------------
  * Hardware description -- change these for your board
@@ -49,26 +48,26 @@ static const struct gpio_dt_spec led_spec = {
 static void blink_timer_expiry(struct k_timer *timer)
 {
     gpio_pin_toggle_dt(&led_spec);
-    ESP_LOGI(TAG, "toggle");
+    LOG_INF("toggle");
 }
 
 static struct k_timer blink_timer;
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== Boreas Blink -- Device Model Example ===");
+    LOG_INF("=== Boreas Blink -- Device Model Example ===");
 
     /* Initialize the GPIO controller device */
     esp_err_t err = device_init(&gpio0);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "GPIO device init failed: %s", esp_err_to_name(err));
+        LOG_ERR("GPIO device init failed: %s", esp_err_to_name(err));
         return;
     }
 
     /* Configure the LED pin as output */
     err = gpio_pin_configure_dt(&led_spec, GPIO_DT_OUTPUT);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "LED pin configure failed: %s", esp_err_to_name(err));
+        LOG_ERR("LED pin configure failed: %s", esp_err_to_name(err));
         return;
     }
 
@@ -76,7 +75,7 @@ void app_main(void)
     k_timer_init(&blink_timer, blink_timer_expiry, NULL);
     k_timer_start(&blink_timer, K_MSEC(500), K_MSEC(500));
 
-    ESP_LOGI(TAG, "Blinking GPIO %d at 2 Hz. Ctrl+] to exit.", BLINK_GPIO);
+    LOG_INF("Blinking GPIO %d at 2 Hz. Ctrl+] to exit.", BLINK_GPIO);
 
     /* Main task has nothing else to do */
     while (1) {
