@@ -19,7 +19,6 @@
 size_t shell_make_argv(char *line, char **argv, size_t max_argc)
 {
     size_t argc = 0;
-    bool in_quote = false;
     char *p = line;
 
     /* Skip leading whitespace */
@@ -29,7 +28,6 @@ size_t shell_make_argv(char *line, char **argv, size_t max_argc)
 
     while (*p != '\0' && argc < max_argc) {
         if (*p == '"') {
-            in_quote = true;
             p++;
             argv[argc++] = p;
             while (*p != '\0' && *p != '"') {

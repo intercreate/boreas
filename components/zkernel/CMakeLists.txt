@@ -20,3 +20,5 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES freertos esp_timer log esp_system nvs_flash
 )
+
+target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)
