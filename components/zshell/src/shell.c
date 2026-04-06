@@ -26,21 +26,6 @@ static void shell_print_prompt(struct shell *sh)
     shell_write(sh, prompt, strlen(prompt));
 }
 
-static void shell_echo_char(struct shell *sh, char ch)
-{
-    if (sh->ctx.echo) {
-        shell_write(sh, &ch, 1);
-    }
-}
-
-static void shell_clear_line(struct shell *sh)
-{
-    /* Move to start, clear line */
-    const char *clear = "\r\033[K";
-    shell_write(sh, clear, strlen(clear));
-    sh->ctx.cmd_buff_len = 0;
-    sh->ctx.cmd_buff_pos = 0;
-}
 
 static void shell_process_char(struct shell *sh, char ch)
 {

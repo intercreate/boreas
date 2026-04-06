@@ -404,6 +404,13 @@ struct k_thread {
 #define K_THREAD_STACK_DEFINE(name, size) \
     static StackType_t name[size / sizeof(StackType_t)]
 
+/** Define a thread stack in PSRAM (external SPI RAM).
+ *  Requires CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y.
+ *  The k_thread struct (containing the TCB) remains in internal DRAM. */
+#define K_THREAD_STACK_DEFINE_PSRAM(name, size) \
+    static StackType_t __attribute__((aligned(16))) \
+        EXT_RAM_BSS_ATTR name[(size) / sizeof(StackType_t)]
+
 #define K_THREAD_STACK_SIZEOF(stack) (sizeof(stack))
 
 typedef TaskHandle_t k_tid_t;
