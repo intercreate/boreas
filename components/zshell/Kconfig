@@ -85,6 +85,11 @@ menu "Boreas Shell (zshell)"
         depends on ZSHELL
         select ZSYS_THREAD_ANALYZER
 
+    config ZSHELL_CMD_DEVICE
+        bool "Enable built-in device commands"
+        default y
+        depends on ZSHELL
+
     config ZSHELL_UART_PORT
         int "UART port number for shell"
         default 0

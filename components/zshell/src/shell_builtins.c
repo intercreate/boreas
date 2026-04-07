@@ -152,6 +152,14 @@ static struct shell_static_entry _builtin_kernel = {
 extern void shell_builtins_zsys_register(void);
 
 /* ----------------------------------------------------------------
+ * device builtins -- defined in shell_builtins_device.c
+ * ---------------------------------------------------------------- */
+
+#ifdef CONFIG_ZSHELL_CMD_DEVICE
+extern void shell_builtins_device_register(void);
+#endif
+
+/* ----------------------------------------------------------------
  * Registration function -- called from shell_init()
  * ---------------------------------------------------------------- */
 
@@ -167,5 +175,9 @@ void shell_builtins_register(void)
 
 #if defined(CONFIG_ZSHELL_CMD_LOG) || defined(CONFIG_ZSHELL_CMD_THREAD)
     shell_builtins_zsys_register();
+#endif
+
+#ifdef CONFIG_ZSHELL_CMD_DEVICE
+    shell_builtins_device_register();
 #endif
 }

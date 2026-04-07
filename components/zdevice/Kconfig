@@ -1,5 +1,12 @@
 menu "Boreas Device Model (zdevice)"
 
+    config DEVICE_REGISTRY_MAX
+        int "Maximum number of registered devices"
+        default 32
+        help
+            Maximum number of devices that can be registered via DEVICE_DEFINE.
+            Each device uses one pointer slot in the global registry.
+
     config DEVICE_MODEL_I2C
         bool "Enable I2C bus driver"
         default n

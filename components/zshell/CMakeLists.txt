@@ -31,9 +31,14 @@ if(CONFIG_ZSHELL)
     if(CONFIG_ZSHELL_CMD_LOG OR CONFIG_ZSHELL_CMD_THREAD)
         list(APPEND srcs "src/shell_builtins_zsys.c")
     endif()
+
+    # device builtins
+    if(CONFIG_ZSHELL_CMD_DEVICE)
+        list(APPEND srcs "src/shell_builtins_device.c")
+    endif()
 endif()
 
-set(requires zkernel freertos log zsys)
+set(requires zkernel freertos log zsys zdevice)
 
 idf_build_get_property(target IDF_TARGET)
 if(NOT "${target}" STREQUAL "linux")
