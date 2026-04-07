@@ -20,6 +20,9 @@ compile_commands.json
 # Claude Code
 .claude/
 
+# Dev log (internal notes)
+devlog/
+
 # OS
 .DS_Store
 Thumbs.db
