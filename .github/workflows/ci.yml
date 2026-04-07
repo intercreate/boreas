@@ -9,15 +9,17 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4
-          command: |
-            cd test
-            idf.py --preview set-target linux
-            idf.py build
-            ./build/boreas_test.elf
+      - name: Build and test (linux target)
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          cd test
+          idf.py --preview set-target linux
+          idf.py build
+          ./build/boreas_test.elf

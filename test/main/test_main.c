@@ -5,6 +5,8 @@
  * Boreas test runner.
  */
 
+#include <stdlib.h>
+
 #include "unity.h"
 
 /* Test group declarations -- always available */
@@ -81,5 +83,9 @@ void app_main(void)
     test_k_work_group();
 #endif
 
+#if CONFIG_IDF_TARGET_LINUX
+    exit(UNITY_END());
+#else
     UNITY_END();
+#endif
 }
