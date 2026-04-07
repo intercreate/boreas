@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4
+          command: |
+            cd test
+            idf.py --preview set-target linux
+            idf.py build
+            ./build/boreas_test.elf
