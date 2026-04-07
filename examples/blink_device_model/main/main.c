@@ -18,10 +18,10 @@
  * Change BLINK_GPIO below for your board.
  */
 
-#include "device_model.h"
-#include "gpio_dt.h"
-#include "zephyr/kernel.h"
-#include "zsys/log.h"
+#include <boreas/device_model.h>
+#include <boreas/gpio_dt.h>
+#include <boreas/zephyr/kernel.h>
+#include <boreas/zsys/log.h>
 
 LOG_MODULE_REGISTER(blink, LOG_LEVEL_INF);
 

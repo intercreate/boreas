@@ -1,6 +1,6 @@
 idf_component_register(
     SRC_DIRS "src"
-    INCLUDE_DIRS "include"
+    INCLUDE_DIRS "include/boreas" "include"
     REQUIRES zkernel freertos esp_system log
 )
 

@@ -17,8 +17,8 @@
  * network, flash, etc.).
  */
 
-#include "zephyr/kernel.h"
-#include "zsys/log.h"
+#include <boreas/zephyr/kernel.h>
+#include <boreas/zsys/log.h>
 
 LOG_MODULE_REGISTER(log_demo, LOG_LEVEL_DBG);
 

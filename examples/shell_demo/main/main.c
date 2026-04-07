@@ -6,9 +6,9 @@
  * and a custom application command.
  */
 
-#include "zephyr/kernel.h"
-#include "zshell/shell.h"
-#include "zsys/log.h"
+#include <boreas/zephyr/kernel.h>
+#include <boreas/zshell/shell.h>
+#include <boreas/zsys/log.h>
 
 LOG_MODULE_REGISTER(shell_demo, LOG_LEVEL_INF);
 
