@@ -15,8 +15,8 @@
  *   5. Using CONTAINER_OF to access context from a work handler
  */
 
-#include "zephyr/kernel.h"
-#include "zsys/log.h"
+#include <boreas/zephyr/kernel.h>
+#include <boreas/zsys/log.h>
 
 LOG_MODULE_REGISTER(demo, LOG_LEVEL_INF);
 

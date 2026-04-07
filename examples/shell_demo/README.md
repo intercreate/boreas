@@ -47,7 +47,7 @@ idf.py -p /dev/cu.usbmodemXXXX flash monitor
 ## Adding Custom Commands
 
 ```c
-#include "zshell/shell.h"
+#include <boreas/zshell/shell.h>
 
 static int cmd_my_status(const struct shell *sh, size_t argc, char **argv)
 {

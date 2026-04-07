@@ -67,7 +67,7 @@ I (575) log_demo: === Demo complete ===
 ## Custom backend example
 
 ```c
-#include "zsys/log.h"
+#include <boreas/zsys/log.h>
 
 static void my_put(const struct log_backend *b, const struct log_msg *msg)
 {
