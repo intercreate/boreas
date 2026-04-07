@@ -1,5 +1,7 @@
 # Boreas
 
+[![CI](https://github.com/intercreate/boreas/actions/workflows/ci.yml/badge.svg)](https://github.com/intercreate/boreas/actions/workflows/ci.yml)
+
 Zephyr-compatible kernel APIs and device model for ESP-IDF.
 
 Boreas provides a thin, tested abstraction layer that brings Zephyr RTOS API conventions to ESP-IDF projects running on FreeRTOS. Named for the Greek god of the north wind -- a sibling to Zephyr (west wind).
@@ -18,7 +20,7 @@ Add Boreas to your ESP-IDF project as a git submodule or local path:
 
 ```bash
 # As submodule
-git submodule add <repo-url> components/boreas
+git submodule add https://github.com/intercreate/boreas.git components/boreas
 
 # In your top-level CMakeLists.txt
 set(EXTRA_COMPONENT_DIRS components/boreas/components)
