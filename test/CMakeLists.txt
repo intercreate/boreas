@@ -1,15 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 
-# On linux target, exclude zdevice (requires ESP-IDF driver component / real HW HAL)
+# zdevice conditionally drops the `driver` dependency on linux,
+# so all components can be included on all targets.
+set(EXTRA_COMPONENT_DIRS "../components")
+
 if("${IDF_TARGET}" STREQUAL "linux")
-    set(EXTRA_COMPONENT_DIRS
-        "../components/zkernel"
-        "../components/zsys"
-        "../components/zshell"
-    )
-    set(COMPONENTS main zkernel zsys zshell)
-else()
-    set(EXTRA_COMPONENT_DIRS "../components")
+    set(COMPONENTS main zkernel zsys zshell zdevice)
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

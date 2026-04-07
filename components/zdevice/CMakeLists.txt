@@ -12,10 +12,17 @@ if(CONFIG_DEVICE_MODEL_GPIO)
     list(APPEND srcs "src/gpio_dt.c")
 endif()
 
+set(requires zkernel zsys)
+
+idf_build_get_property(target IDF_TARGET)
+if(NOT "${target}" STREQUAL "linux")
+    list(APPEND requires driver)
+endif()
+
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include/boreas" "include"
-    REQUIRES driver zkernel zsys
+    REQUIRES ${requires}
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)

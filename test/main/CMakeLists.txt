@@ -9,6 +9,7 @@ set(test_srcs
     "test_k_event.c"
     "test_retry.c"
     "test_log.c"
+    "test_device_registry.c"
 )
 
 idf_build_get_property(target IDF_TARGET)
@@ -33,5 +34,5 @@ endif()
 idf_component_register(
     SRCS ${test_srcs}
     INCLUDE_DIRS "."
-    REQUIRES unity zkernel zsys zshell
+    REQUIRES unity zkernel zsys zshell zdevice
 )
