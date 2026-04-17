@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -51,12 +50,7 @@ struct sys_init_entry {
     enum sys_init_level level;
     uint8_t          priority; /* 0-255, lower = earlier within level */
     const char      *name;
-    bool             initialized;
 };
-
-/* Global registry -- populated by constructors before main() */
-extern struct sys_init_entry *_sys_init_entries[];
-extern size_t _sys_init_count;
 
 /**
  * Register an init function.
@@ -65,34 +59,30 @@ extern size_t _sys_init_count;
  * @param _level     One of: EARLY, STORAGE, DEVICE, AUDIO, NETWORK, APPLICATION
  * @param _prio      Priority within level (0-255, lower = earlier).
  */
-#define SYS_INIT(_init_fn, _level, _prio) \
-    static struct sys_init_entry _sys_init_##_init_fn = { \
-        .init_fn = (_init_fn), \
-        .shutdown_fn = NULL, \
-        .level = SYS_INIT_LEVEL_##_level, \
-        .priority = (_prio), \
-        .name = #_init_fn, \
-        .initialized = false, \
-    }; \
-    static void __attribute__((constructor)) _sys_init_register_##_init_fn(void) { \
-        _sys_init_entries[_sys_init_count++] = &_sys_init_##_init_fn; \
-    }
+#define SYS_INIT(_init_fn, _level, _prio)                                     \
+    static const struct sys_init_entry                                        \
+        __attribute__((section("sys_init_entries"), used))                    \
+        _sys_init_entry_##_init_fn = {                                        \
+            .init_fn     = (_init_fn),                                        \
+            .shutdown_fn = NULL,                                              \
+            .level       = SYS_INIT_LEVEL_##_level,                           \
+            .priority    = (_prio),                                           \
+            .name        = #_init_fn,                                         \
+        }
 
 /**
  * Register init + shutdown pair.
  */
-#define SYS_INIT_WITH_SHUTDOWN(_init_fn, _shutdown_fn, _level, _prio) \
-    static struct sys_init_entry _sys_init_##_init_fn = { \
-        .init_fn = (_init_fn), \
-        .shutdown_fn = (_shutdown_fn), \
-        .level = SYS_INIT_LEVEL_##_level, \
-        .priority = (_prio), \
-        .name = #_init_fn, \
-        .initialized = false, \
-    }; \
-    static void __attribute__((constructor)) _sys_init_register_##_init_fn(void) { \
-        _sys_init_entries[_sys_init_count++] = &_sys_init_##_init_fn; \
-    }
+#define SYS_INIT_WITH_SHUTDOWN(_init_fn, _shutdown_fn, _level, _prio)         \
+    static const struct sys_init_entry                                        \
+        __attribute__((section("sys_init_entries"), used))                    \
+        _sys_init_entry_##_init_fn = {                                        \
+            .init_fn     = (_init_fn),                                        \
+            .shutdown_fn = (_shutdown_fn),                                    \
+            .level       = SYS_INIT_LEVEL_##_level,                           \
+            .priority    = (_prio),                                           \
+            .name        = #_init_fn,                                         \
+        }
 
 /**
  * Run all registered init functions in order.

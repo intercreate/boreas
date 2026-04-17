@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include "esp_attr.h"
 #include "esp_err.h"
 
 struct device {
@@ -51,9 +52,18 @@ size_t device_get_count(void);
 /** Return device at index, or NULL if out of range. */
 const struct device *device_get_by_index(size_t idx);
 
+/**
+ * Define and register a device instance.
+ *
+ * NOTE: Invoke this in `main/` (e.g. a `board_devices.c`) or another TU that
+ * is linked whole into the final image. Registration relies on a
+ * `__attribute__((constructor))`, which ESP-IDF's linker strips when a TU
+ * inside a component static library has no other externally-referenced
+ * symbols -- the device would silently not register.
+ */
 #define DEVICE_DEFINE(_name, _init, _api, _config, _data, _bus)    \
     static bool _name##_ready;                                      \
-    static const struct device _name = {                            \
+    static DRAM_ATTR const struct device _name = {                  \
         .name   = #_name,                                           \
         .bus    = (_bus),                                           \
         .api    = (_api),                                           \

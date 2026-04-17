@@ -19,6 +19,7 @@ idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include/boreas" "include"
     REQUIRES freertos esp_timer log esp_system nvs_flash
+    LDFRAGMENTS "zkernel.lf"
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)

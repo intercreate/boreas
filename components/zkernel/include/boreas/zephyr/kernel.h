@@ -358,6 +358,10 @@ struct k_work_delayable {
     struct k_work_queue *queue;  /* target queue (NULL = system queue) */
 };
 
+/* BEHAVIORAL DELTA: Unlike Zephyr, this macro does NOT produce a ready-to-use
+ * item. The embedded k_timer wraps esp_timer_handle_t which requires a runtime
+ * esp_timer_create() call. You MUST call k_work_init_delayable() before the
+ * first k_work_schedule() / k_work_reschedule(). */
 #define K_WORK_DELAYABLE_DEFINE(name, _handler) \
     struct k_work_delayable name = { \
         .work = {.handler = (_handler)}, \

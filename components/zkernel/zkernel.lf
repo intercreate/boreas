@@ -1,0 +1,12 @@
+[sections:sys_init_entries]
+entries:
+    sys_init_entries+
+
+[scheme:sys_init]
+entries:
+    sys_init_entries -> dram0_data
+
+[mapping:sys_init]
+archive: *
+entries:
+    * (sys_init)
