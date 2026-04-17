@@ -19,6 +19,8 @@ if (device_is_ready(&my_sensor)) { ... }
 
 `DEVICE_DEFINE` creates a static `struct device` with an auto-generated ready flag. `device_init()` calls the init function and sets the ready flag on success.
 
+> **Where to put `DEVICE_DEFINE`:** instantiate devices in `main/` (e.g. a `board_devices.c` -- the DTS-equivalent) or an equivalently whole-archived TU. Registration uses `__attribute__((constructor))`, which ESP-IDF's linker strips from component static libraries when the object has no other externally-referenced symbols. Centralizing device definitions in `main/` avoids this and mirrors Zephyr's "board defines devices, drivers don't instantiate" pattern.
+
 ## GPIO (`gpio_dt_spec`)
 
 Requires `CONFIG_DEVICE_MODEL_GPIO=y`.
