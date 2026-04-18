@@ -60,7 +60,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(my_subcmds,
     SHELL_CMD(status, NULL, "Show status", cmd_my_status)
 );
 
-/* Root command -- registered via constructor, available automatically */
+/* Root command -- picked up by shell_init(), available automatically */
 SHELL_CMD_REGISTER(myapp, &my_subcmds, "My application", NULL);
 ```
 

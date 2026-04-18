@@ -1,12 +1,13 @@
 [sections:sys_init_entries]
 entries:
-    sys_init_entries+
+    .sys_init_entries+
 
-[scheme:sys_init]
+[scheme:sys_init_placement]
 entries:
     sys_init_entries -> dram0_data
 
-[mapping:sys_init]
+[mapping:sys_init_placement]
 archive: *
 entries:
-    * (sys_init)
+    * (sys_init_placement);
+        sys_init_entries -> dram0_data KEEP() ALIGN(4, pre, post) SURROUND(sys_init_entries)

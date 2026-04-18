@@ -62,4 +62,10 @@ static const struct log_backend_api __attribute__((used)) _esp_backend_api = {
 
 LOG_BACKEND_DEFINE(esp_log, &_esp_backend_api, NULL);
 
+/* Archive-pull anchor: this TU's only externally-visible symbol. log.c
+ * references it so the linker pulls this .o out of libzsys.a and places
+ * the LOG_BACKEND_DEFINE struct into .log_backends. Without this, the
+ * default console backend is silently dropped. */
+const int zsys_log_backend_esp_anchor = 1;
+
 #endif /* CONFIG_ZSYS_LOG_MODULE */

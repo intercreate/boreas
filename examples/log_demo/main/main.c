@@ -25,8 +25,11 @@ LOG_MODULE_REGISTER(log_demo, LOG_LEVEL_DBG);
 /* -------------------------------------------------------------------
  * Custom backend: message counter
  *
- * Demonstrates LOG_BACKEND_DEFINE -- the same constructor-based
- * registration used by SHELL_CMD_REGISTER and DEVICE_DEFINE.
+ * Demonstrates LOG_BACKEND_DEFINE. On ESP targets the backend struct is
+ * emplaced into the .log_backends linker section and picked up by
+ * zsys_log_init(); on the macOS host test target a constructor fallback
+ * runs instead. Either way the backend must live in main/ or a TU with
+ * another externally-referenced symbol so the linker doesn't strip it.
  * This backend simply counts messages by level.
  * ---------------------------------------------------------------- */
 
