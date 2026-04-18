@@ -1,0 +1,19 @@
+[sections:log_module_entries]
+entries:
+    .log_module_entries+
+
+[sections:log_backends]
+entries:
+    .log_backends+
+
+[scheme:zsys_log_placement]
+entries:
+    log_module_entries -> dram0_data
+    log_backends       -> dram0_data
+
+[mapping:zsys_log_placement]
+archive: *
+entries:
+    * (zsys_log_placement);
+        log_module_entries -> dram0_data KEEP() ALIGN(4, pre, post) SURROUND(log_module_entries),
+        log_backends       -> dram0_data KEEP() ALIGN(4, pre, post) SURROUND(log_backends)

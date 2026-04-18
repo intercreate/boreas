@@ -165,12 +165,12 @@ extern void shell_builtins_device_register(void);
 
 void shell_builtins_register(void)
 {
-    _shell_root_cmds[_shell_root_cmd_count++] = &_builtin_help;
-    _shell_root_cmds[_shell_root_cmd_count++] = &_builtin_clear;
-    _shell_root_cmds[_shell_root_cmd_count++] = &_builtin_echo;
+    shell_cmd_register(&_builtin_help);
+    shell_cmd_register(&_builtin_clear);
+    shell_cmd_register(&_builtin_echo);
 
 #ifdef CONFIG_ZSHELL_CMD_KERNEL
-    _shell_root_cmds[_shell_root_cmd_count++] = &_builtin_kernel;
+    shell_cmd_register(&_builtin_kernel);
 #endif
 
 #if defined(CONFIG_ZSHELL_CMD_LOG) || defined(CONFIG_ZSHELL_CMD_THREAD)

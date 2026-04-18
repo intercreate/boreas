@@ -2,20 +2,25 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Intercreate
  *
- * Constructor-based root command registry.
- * Same pattern as sys_init.c: constructors fill an array,
- * then shell_cmd_sort_root() sorts alphabetically at init time.
- *
- * Zephyr reference: iterable sections in shell.h
+ * Runtime root-command registry. shell_init() populates it from the
+ * .shell_root_cmds linker section on ESP targets, or from constructors
+ * emitted by SHELL_CMD_REGISTER on the Mach-O host target.
+ * shell_cmd_sort_root() sorts alphabetically at init time.
  */
 
 #include "zshell/shell.h"
 
 #include <string.h>
 
-/* Global registry -- populated by __attribute__((constructor)) */
 struct shell_static_entry *_shell_root_cmds[CONFIG_ZSHELL_MAX_ROOT_CMDS];
 size_t _shell_root_cmd_count = 0;
+
+void shell_cmd_register(struct shell_static_entry *entry)
+{
+    if (_shell_root_cmd_count < CONFIG_ZSHELL_MAX_ROOT_CMDS) {
+        _shell_root_cmds[_shell_root_cmd_count++] = entry;
+    }
+}
 
 /* Insertion sort by syntax name (alphabetical) -- runs once at init */
 void shell_cmd_sort_root(void)
