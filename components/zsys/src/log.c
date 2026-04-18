@@ -130,7 +130,7 @@ void zsys_log_backend_register(const struct log_backend *backend)
     _log_backends[_log_backend_count++] = backend;
 }
 
-#if !defined(__APPLE__)
+#if !defined(CONFIG_IDF_TARGET_LINUX)
 extern const struct log_backend _log_backends_start[];
 extern const struct log_backend _log_backends_end[];
 #endif
@@ -285,7 +285,7 @@ void zsys_log_msg_emit(uint8_t level, const char *module,
 
 int zsys_log_init(void)
 {
-#if !defined(__APPLE__)
+#if !defined(CONFIG_IDF_TARGET_LINUX)
     /* Pull log_backend_esp.c out of libzsys.a on ESP targets so its
      * LOG_BACKEND_DEFINE lands in .log_backends. The reference must survive
      * both compiler optimization and linker --gc-sections; we do it as a

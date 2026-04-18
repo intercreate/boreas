@@ -85,14 +85,15 @@ the load segment), and `SURROUND` emits the boundary symbols we need.
   unaligned byte and `(end - start) / sizeof(struct)` yields a non-integer
   count.
 
-## Host-test (macOS / Mach-O) fallback
+## Host-test (linux target) fallback
 
-The linux target unit tests run on the macOS host, which uses Mach-O.
-Mach-O section specifiers require `"__SEGMENT,section"` form and don't
-produce boundary symbols. Each macro uses a `#if defined(__APPLE__)` guard
-that falls back to the legacy constructor pattern on Apple hosts. This is
-safe because the host test executable is whole-linked — archive-stripping
-isn't a concern there.
+The unit-test binary is built against ESP-IDF's linux preview target, which
+runs on the developer host (macOS or Linux). This target doesn't expose the
+ESP-specific DRAM layout that ldgen uses to materialize `SURROUND` symbols,
+and on macOS hosts the Mach-O section syntax differs from ELF. Each macro
+uses a `#if defined(CONFIG_IDF_TARGET_LINUX)` guard that falls back to the
+legacy constructor pattern on this target. That's safe because the host
+test executable is whole-linked — archive-stripping isn't a concern there.
 
 Both paths populate the same runtime registry, so dispatch and iteration
 code is target-agnostic.
@@ -102,7 +103,7 @@ code is target-agnostic.
 1. Declare the descriptor struct in a public header.
 2. Emit instances into a dotted named section via
    `__attribute__((section(".my_section"), used))`. Guard with
-   `#if defined(__APPLE__)` to fall back to a constructor that directly
+   `#if defined(CONFIG_IDF_TARGET_LINUX)` to fall back to a constructor that directly
    registers with the runtime API.
 3. Add the section + mapping to your component's `.lf`:
 
@@ -126,7 +127,7 @@ code is target-agnostic.
    `idf_component_register(...)`.
 5. In the subsystem's init entry point, walk `_my_section_start` to
    `_my_section_end` on ESP and call the runtime-register function for
-   each entry. Do not walk the section on `__APPLE__` — constructors have
+   each entry. Do not walk the section on `CONFIG_IDF_TARGET_LINUX` — constructors have
    already populated the runtime state there.
 6. Document the archive-pull constraint in the macro's docblock.
 
