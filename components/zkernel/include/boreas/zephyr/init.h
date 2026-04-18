@@ -22,6 +22,10 @@
 
 #pragma once
 
+/* sdkconfig.h must be visible before the CONFIG_IDF_TARGET_LINUX guard on the
+ * section attribute below. */
+#include "sdkconfig.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -42,7 +46,7 @@ enum sys_init_level {
     SYS_INIT_LEVEL_COUNT,
 };
 
-#if defined(__APPLE__)
+#if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O (macOS host) doesn't accept plain section names. The linux-target
  * unit tests don't exercise SYS_INIT, so the attribute becomes a no-op here
  * and sys_init_run_all() treats the section as empty (see sys_init.c). */

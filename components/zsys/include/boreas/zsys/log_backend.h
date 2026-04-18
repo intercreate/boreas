@@ -98,7 +98,7 @@ struct log_backend {
  * the linker section. */
 void zsys_log_backend_register(const struct log_backend *backend);
 
-#if defined(__APPLE__)
+#if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O fallback: host unit-test executable is whole-linked, so the legacy
  * constructor path is safe. See LOG_MODULE_REGISTER for the rationale. */
 #define LOG_BACKEND_DEFINE(_name, _api, _ctx)                                \

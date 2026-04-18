@@ -9,7 +9,7 @@
 
 static const char *TAG = "sys_init";
 
-#if defined(__APPLE__)
+#if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O host stub -- see zephyr/init.h. The macOS unit-test build does not
  * populate .sys_init_entries; expose an empty pair so count = 0. */
 static const struct sys_init_entry _sys_init_empty[0];

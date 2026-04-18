@@ -12,6 +12,10 @@
 
 #pragma once
 
+/* sdkconfig.h must be visible before the CONFIG_IDF_TARGET_LINUX guard on the
+ * SHELL_CMD_REGISTER macro below. */
+#include "sdkconfig.h"
+
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -129,7 +133,7 @@ void shell_cmd_register(struct shell_static_entry *entry);
  * archive members -- only unresolved-symbol references do. (Same constraint
  * as SYS_INIT / LOG_MODULE_REGISTER.)
  */
-#if defined(__APPLE__)
+#if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O fallback: see log.h. Whole-link safe -> constructor is fine. */
 #define SHELL_CMD_REGISTER(_syntax, _subcmd, _help, _handler)          \
     static struct shell_static_entry _shell_cmd_##_syntax = {          \

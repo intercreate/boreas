@@ -66,7 +66,7 @@ struct zsys_log_module_desc {
     esp_log_level_t default_level;
 };
 
-#if defined(__APPLE__)
+#if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O (macOS host) doesn't accept plain section names. The linux-target
  * unit test executable is whole-linked, so the legacy constructor path is
  * safe here -- no archive-stripping risk to work around. */
