@@ -155,10 +155,10 @@ static struct shell_static_entry _builtin_thread = {
 void shell_builtins_zsys_register(void)
 {
 #ifdef CONFIG_ZSHELL_CMD_LOG
-    _shell_root_cmds[_shell_root_cmd_count++] = &_builtin_log;
+    shell_cmd_register(&_builtin_log);
 #endif
 
 #ifdef CONFIG_ZSHELL_CMD_THREAD
-    _shell_root_cmds[_shell_root_cmd_count++] = &_builtin_thread;
+    shell_cmd_register(&_builtin_thread);
 #endif
 }

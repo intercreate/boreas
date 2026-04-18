@@ -53,15 +53,42 @@ extern "C" {
 
 #if defined(CONFIG_ZSYS_LOG_MODULE)
 
-#define LOG_MODULE_REGISTER(module_name, default_level)                     \
+/* Descriptor placed into a linker-section registry. Enumerated by
+ * zsys_log_init() at boot. See also zsys/zsys.lf and docs/linker-section-registration.md.
+ *
+ * NOTE: LOG_MODULE_REGISTER() must live in a TU that has at least one other
+ * externally-referenced symbol, or in main/. Linker scripts do not pull
+ * archive members -- only unresolved-symbol references do. (Same constraint
+ * as ESP-IDF's ESP_SYSTEM_INIT_FN and boreas's SYS_INIT / DEVICE_DEFINE.)
+ */
+struct zsys_log_module_desc {
+    const char     *name;
+    esp_log_level_t default_level;
+};
+
+#if defined(__APPLE__)
+/* Mach-O (macOS host) doesn't accept plain section names. The linux-target
+ * unit test executable is whole-linked, so the legacy constructor path is
+ * safe here -- no archive-stripping risk to work around. */
+#define LOG_MODULE_REGISTER(module_name, default_level_)                    \
     static const char *TAG = #module_name;                                  \
     static void __attribute__((constructor))                                \
-    _log_module_register_##module_name(void)                                \
+    _zsys_log_module_register_##module_name(void)                           \
     {                                                                       \
-        esp_log_level_set(#module_name, (esp_log_level_t)(default_level));  \
+        esp_log_level_set(#module_name, (esp_log_level_t)(default_level_)); \
         zsys_log_register_module(#module_name,                              \
-                                 (esp_log_level_t)(default_level));         \
+                                 (esp_log_level_t)(default_level_));        \
     }
+#else
+#define LOG_MODULE_REGISTER(module_name, default_level_)                    \
+    static const char *TAG = #module_name;                                  \
+    static const struct zsys_log_module_desc                                \
+        __attribute__((section(".log_module_entries"), used))               \
+        _zsys_log_module_desc_##module_name = {                             \
+            .name          = #module_name,                                  \
+            .default_level = (esp_log_level_t)(default_level_),             \
+        }
+#endif
 
 /**
  * Declare use of a log module registered in another file.

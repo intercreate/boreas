@@ -188,7 +188,7 @@ static int my_init(void) { /* ... */ return 0; }
 SYS_INIT(my_init, /*level=*/0, /*priority=*/50);
 ```
 
-Constructor-based ordered initialization. Lower level runs first, then by priority within level.
+Ordered initialization. Entries are emplaced into the `.sys_init_entries` linker section at compile time and iterated by `sys_init_run_all()`. Lower level runs first, then by priority within level. `SYS_INIT` callsites must live in `main/` or any TU with an externally-referenced symbol. See `docs/linker-section-registration.md`.
 
 ## Configuration
 

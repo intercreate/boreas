@@ -109,28 +109,50 @@ struct shell {
  * Command Registration Macros
  * ---------------------------------------------------------------- */
 
-/* Global root command registry (populated by constructors) */
+/* Runtime root command registry. Populated at init time:
+ *   - ESP target: shell_init() walks the .shell_root_cmds linker section and
+ *     calls shell_cmd_register() for each entry.
+ *   - macOS host (Mach-O): SHELL_CMD_REGISTER emits a constructor that calls
+ *     shell_cmd_register() directly -- the host test executable is
+ *     whole-linked, so archive-stripping isn't a concern.
+ */
 extern struct shell_static_entry *_shell_root_cmds[];
 extern size_t _shell_root_cmd_count;
 
+void shell_cmd_register(struct shell_static_entry *entry);
+
 /**
  * Register a root-level command.
- * Uses __attribute__((constructor)) to auto-register before main().
+ *
+ * NOTE: SHELL_CMD_REGISTER() must live in a TU that has at least one other
+ * externally-referenced symbol, or in main/. Linker scripts do not pull
+ * archive members -- only unresolved-symbol references do. (Same constraint
+ * as SYS_INIT / LOG_MODULE_REGISTER.)
  */
+#if defined(__APPLE__)
+/* Mach-O fallback: see log.h. Whole-link safe -> constructor is fine. */
 #define SHELL_CMD_REGISTER(_syntax, _subcmd, _help, _handler)          \
     static struct shell_static_entry _shell_cmd_##_syntax = {          \
         .syntax  = #_syntax,                                           \
         .help    = (_help),                                            \
-        .subcmd  = (const union shell_cmd_entry *)(_subcmd),          \
+        .subcmd  = (const union shell_cmd_entry *)(_subcmd),           \
         .handler = (_handler),                                         \
     };                                                                 \
-    static void __attribute__((constructor))                            \
+    static void __attribute__((constructor))                           \
     _shell_reg_##_syntax(void) {                                       \
-        if (_shell_root_cmd_count < CONFIG_ZSHELL_MAX_ROOT_CMDS) {     \
-            _shell_root_cmds[_shell_root_cmd_count++] =                \
-                &_shell_cmd_##_syntax;                                 \
-        }                                                              \
+        shell_cmd_register(&_shell_cmd_##_syntax);                     \
     }
+#else
+#define SHELL_CMD_REGISTER(_syntax, _subcmd, _help, _handler)          \
+    static struct shell_static_entry                                   \
+        __attribute__((section(".shell_root_cmds"), used))             \
+        _shell_cmd_##_syntax = {                                       \
+            .syntax  = #_syntax,                                       \
+            .help    = (_help),                                        \
+            .subcmd  = (const union shell_cmd_entry *)(_subcmd),       \
+            .handler = (_handler),                                     \
+        }
+#endif
 
 /**
  * Create a static subcommand set (array of shell_static_entry).

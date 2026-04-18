@@ -44,13 +44,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(app_subcmds,
     SHELL_CMD(reset,  NULL, "Reset device", cmd_reset)
 );
 
-// Root command -- registered via constructor, no manual wiring
+// Root command -- picked up by shell_init(), no manual wiring
 SHELL_CMD_REGISTER(app, &app_subcmds, "Application commands", NULL);
 ```
 
-Commands are registered at startup via `__attribute__((constructor))` and sorted alphabetically.
+Commands are emplaced into the `.shell_root_cmds` linker section on ESP targets (iterated by `shell_init()`), or registered via a constructor fallback on the macOS host test target. Either way they're sorted alphabetically before the shell thread starts.
 
-**Library note:** Constructors in static libraries (`.a`) are stripped by the linker if no symbol from the object file is referenced. If you register commands from a library component, either call a registration function explicitly (like the built-in commands do), or ensure a symbol from that file is referenced elsewhere.
+**Library note:** Linker scripts do not pull archive members — only unresolved-symbol references do. If you call `SHELL_CMD_REGISTER()` from inside a library component, the object file may still be stripped if nothing else in it is externally referenced. Put user-facing commands in `main/`, or make sure the enclosing TU exposes another referenced symbol (the built-in commands do this by exporting a `shell_builtins_*_register()` function). See `docs/linker-section-registration.md`.
 
 ## Output functions
 

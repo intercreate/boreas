@@ -9,8 +9,17 @@
 
 static const char *TAG = "sys_init";
 
-extern const struct sys_init_entry __start_sys_init_entries[];
-extern const struct sys_init_entry __stop_sys_init_entries[];
+#if defined(__APPLE__)
+/* Mach-O host stub -- see zephyr/init.h. The macOS unit-test build does not
+ * populate .sys_init_entries; expose an empty pair so count = 0. */
+static const struct sys_init_entry _sys_init_empty[0];
+#define _sys_init_entries_start (_sys_init_empty)
+#define _sys_init_entries_end   (_sys_init_empty)
+#else
+/* Boundary symbols emitted by ldgen SURROUND(sys_init_entries) in zkernel.lf. */
+extern const struct sys_init_entry _sys_init_entries_start[];
+extern const struct sys_init_entry _sys_init_entries_end[];
+#endif
 
 /* Simple insertion sort by (level, priority) -- runs once at boot */
 static void sort_entries(const struct sys_init_entry **sorted, size_t count)
@@ -31,7 +40,7 @@ static void sort_entries(const struct sys_init_entry **sorted, size_t count)
 
 int sys_init_run_all(void)
 {
-    size_t count = (size_t)(__stop_sys_init_entries - __start_sys_init_entries);
+    size_t count = (size_t)(_sys_init_entries_end - _sys_init_entries_start);
 
     if (count == 0) {
         ESP_LOGI(TAG, "No SYS_INIT entries registered");
@@ -50,7 +59,7 @@ int sys_init_run_all(void)
      * the const section data. */
     const struct sys_init_entry *sorted[CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES];
     for (size_t i = 0; i < count; i++) {
-        sorted[i] = &__start_sys_init_entries[i];
+        sorted[i] = &_sys_init_entries_start[i];
     }
     sort_entries(sorted, count);
 
@@ -72,7 +81,7 @@ int sys_init_run_all(void)
 
 void sys_shutdown_run_all(void)
 {
-    size_t count = (size_t)(__stop_sys_init_entries - __start_sys_init_entries);
+    size_t count = (size_t)(_sys_init_entries_end - _sys_init_entries_start);
 
     if (count == 0) {
         return;
@@ -84,7 +93,7 @@ void sys_shutdown_run_all(void)
 
     const struct sys_init_entry *sorted[CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES];
     for (size_t i = 0; i < count; i++) {
-        sorted[i] = &__start_sys_init_entries[i];
+        sorted[i] = &_sys_init_entries_start[i];
     }
     sort_entries(sorted, count);
 

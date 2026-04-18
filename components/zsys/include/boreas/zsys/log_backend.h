@@ -20,6 +20,12 @@
 
 #pragma once
 
+/* sdkconfig.h must be visible *before* the LOG_BACKEND_DEFINE macro is
+ * defined below -- otherwise CONFIG_ZSYS_LOG_MODULE is undefined at macro
+ * definition time and the macro silently becomes a no-op, even if callers
+ * see CONFIG defined by the time they invoke it. */
+#include "sdkconfig.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -69,30 +75,53 @@ struct log_backend_api {
 struct log_backend {
     const struct log_backend_api *api;
     const char                   *name;
-    bool                          active;
     void                         *ctx;   /* backend-private context */
 };
 
 /* --------------------------------------------------------------------------
- * Backend registration (constructor-based, matches SHELL_CMD_REGISTER pattern)
+ * Backend registration (linker-section based)
+ *
+ * Backends are emplaced into the .log_backends section and enumerated by
+ * zsys_log_init() at boot. See zsys/zsys.lf and docs/linker-section-registration.md.
+ *
+ * NOTE: LOG_BACKEND_DEFINE() must live in a TU that has at least one other
+ * externally-referenced symbol, or in main/. Linker scripts do not pull
+ * archive members -- only unresolved-symbol references do. (Same constraint
+ * as ESP-IDF's ESP_SYSTEM_INIT_FN and boreas's SYS_INIT / DEVICE_DEFINE.)
  * -------------------------------------------------------------------------- */
 
 #if defined(CONFIG_ZSYS_LOG_MODULE)
 
-void zsys_log_backend_register(struct log_backend *backend);
+/* Runtime backend registration. Public API so Mach-O host builds (which use
+ * constructors, since they can't use plain section names) can register, and
+ * so that zsys_log_init() on ESP targets can populate the runtime array from
+ * the linker section. */
+void zsys_log_backend_register(const struct log_backend *backend);
 
+#if defined(__APPLE__)
+/* Mach-O fallback: host unit-test executable is whole-linked, so the legacy
+ * constructor path is safe. See LOG_MODULE_REGISTER for the rationale. */
 #define LOG_BACKEND_DEFINE(_name, _api, _ctx)                                \
-    static struct log_backend _log_backend_##_name = {                       \
-        .api    = (_api),                                                    \
-        .name   = #_name,                                                    \
-        .active = true,                                                      \
-        .ctx    = (_ctx),                                                    \
+    static const struct log_backend _log_backend_##_name = {                 \
+        .api  = (_api),                                                      \
+        .name = #_name,                                                      \
+        .ctx  = (_ctx),                                                      \
     };                                                                       \
-    static void __attribute__((constructor))                                  \
+    static void __attribute__((constructor))                                 \
     _log_backend_register_##_name(void)                                      \
     {                                                                        \
         zsys_log_backend_register(&_log_backend_##_name);                    \
     }
+#else
+#define LOG_BACKEND_DEFINE(_name, _api, _ctx)                                \
+    static const struct log_backend                                          \
+        __attribute__((section(".log_backends"), used))                      \
+        _log_backend_##_name = {                                             \
+            .api  = (_api),                                                  \
+            .name = #_name,                                                  \
+            .ctx  = (_ctx),                                                  \
+        }
+#endif
 
 #else
 

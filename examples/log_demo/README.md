@@ -80,7 +80,7 @@ static const struct log_backend_api my_api = { .put = my_put };
 LOG_BACKEND_DEFINE(my_backend, &my_api, NULL);
 ```
 
-The backend is registered automatically at startup via `__attribute__((constructor))` -- no manual wiring needed.
+The backend is picked up automatically at `zsys_log_init()` time — on ESP targets it's emplaced into the `.log_backends` linker section and iterated at boot; on the macOS host test target a constructor fallback runs instead. No manual wiring needed. Place the `LOG_BACKEND_DEFINE` call in `main/` or any TU with an externally-referenced symbol so the linker doesn't strip the backend from its archive.
 
 ## Configuration
 

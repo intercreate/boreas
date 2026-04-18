@@ -1,0 +1,13 @@
+[sections:shell_root_cmds]
+entries:
+    .shell_root_cmds+
+
+[scheme:shell_root_cmds_placement]
+entries:
+    shell_root_cmds -> dram0_data
+
+[mapping:shell_root_cmds_placement]
+archive: *
+entries:
+    * (shell_root_cmds_placement);
+        shell_root_cmds -> dram0_data KEEP() ALIGN(4, pre, post) SURROUND(shell_root_cmds)

@@ -268,7 +268,21 @@ int shell_init(struct shell *sh, const struct shell_transport *transport,
 
     sh->ctx.state = SHELL_STATE_INITIALIZED;
 
-    /* Register built-in commands, then sort all root commands */
+    /* Register built-in commands, then sort all root commands.
+     * On ESP targets, also walk the .shell_root_cmds section and register
+     * each user-defined SHELL_CMD_REGISTER entry into the runtime array.
+     * On Mach-O host builds, constructors already registered user commands. */
+#if !defined(__APPLE__)
+    {
+        extern struct shell_static_entry _shell_root_cmds_start[];
+        extern struct shell_static_entry _shell_root_cmds_end[];
+        const size_t n = (size_t)(_shell_root_cmds_end -
+                                  _shell_root_cmds_start);
+        for (size_t i = 0; i < n; i++) {
+            shell_cmd_register(&_shell_root_cmds_start[i]);
+        }
+    }
+#endif
     shell_builtins_register();
     shell_cmd_sort_root();
 

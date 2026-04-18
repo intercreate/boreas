@@ -83,7 +83,7 @@ static const struct log_backend_api my_api = { .put = my_put };
 LOG_BACKEND_DEFINE(my_backend, &my_api, NULL);
 ```
 
-Backends are registered automatically via constructor. The default ESP backend outputs in standard ESP-IDF format.
+Backends are picked up automatically at `zsys_log_init()` time — on ESP targets they're emplaced into the `.log_backends` linker section; on the macOS host test target a constructor fallback runs. The default ESP backend outputs in standard ESP-IDF format. `LOG_BACKEND_DEFINE` callsites must live in `main/` or any TU with an externally-referenced symbol (same rule as `SHELL_CMD_REGISTER` and `SYS_INIT`). See `docs/linker-section-registration.md`.
 
 ### Panic mode
 

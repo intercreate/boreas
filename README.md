@@ -56,6 +56,14 @@ idf.py set-target esp32s3
 idf.py build flash monitor
 ```
 
+## Documentation
+
+- Per-component usage in each component's `README.md` (`components/<name>/README.md`).
+- `docs/linker-section-registration.md` — how `SYS_INIT`, `LOG_MODULE_REGISTER`,
+  `LOG_BACKEND_DEFINE`, and `SHELL_CMD_REGISTER` work under ESP-IDF's
+  archive-stripping rules, including the constraint that callsites must live in
+  `main/` (or any TU with an externally-referenced symbol).
+
 ## License
 
 Apache 2.0. Copyright 2026 Intercreate.
