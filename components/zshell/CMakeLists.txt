@@ -49,6 +49,7 @@ idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include/boreas" "include"
     REQUIRES ${requires}
+    LDFRAGMENTS "zshell.lf"
 )
 
 if(CONFIG_ZSHELL)

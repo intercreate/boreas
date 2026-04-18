@@ -105,16 +105,22 @@ int zsys_log_get_module_info(int index, const char **name, int *level)
 
 /* -------------------------------------------------------------------------
  * Backend registry
+ *
+ * Runtime array populated by zsys_log_backend_register(). On ESP targets,
+ * zsys_log_init() walks the .log_backends linker section and registers each
+ * entry. On the macOS host (Mach-O), LOG_BACKEND_DEFINE emits a constructor
+ * that calls register directly; the host test executable is whole-linked so
+ * archive-stripping isn't a concern.
  * ------------------------------------------------------------------------- */
 
 #ifndef CONFIG_ZSYS_LOG_MAX_BACKENDS
 #define CONFIG_ZSYS_LOG_MAX_BACKENDS 4
 #endif
 
-static struct log_backend *_log_backends[CONFIG_ZSYS_LOG_MAX_BACKENDS];
+static const struct log_backend *_log_backends[CONFIG_ZSYS_LOG_MAX_BACKENDS];
 static int _log_backend_count = 0;
 
-void zsys_log_backend_register(struct log_backend *backend)
+void zsys_log_backend_register(const struct log_backend *backend)
 {
     if (_log_backend_count >= CONFIG_ZSYS_LOG_MAX_BACKENDS) {
         ESP_LOGW(TAG, "Backend registry full, cannot register '%s'",
@@ -123,6 +129,11 @@ void zsys_log_backend_register(struct log_backend *backend)
     }
     _log_backends[_log_backend_count++] = backend;
 }
+
+#if !defined(CONFIG_IDF_TARGET_LINUX)
+extern const struct log_backend _log_backends_start[];
+extern const struct log_backend _log_backends_end[];
+#endif
 
 /* -------------------------------------------------------------------------
  * Mode tracking
@@ -162,8 +173,9 @@ static void log_output_thread(void *p1, void *p2, void *p3)
     for (;;) {
         if (k_msgq_get(&_zsys_log_msgq, &msg, K_FOREVER) == 0) {
             for (int i = 0; i < _log_backend_count; i++) {
-                if (_log_backends[i]->active && _log_backends[i]->api->put) {
-                    _log_backends[i]->api->put(_log_backends[i], &msg);
+                const struct log_backend *b = _log_backends[i];
+                if (b->api->put) {
+                    b->api->put(b, &msg);
                 }
             }
         }
@@ -216,8 +228,9 @@ static void fill_log_msg(struct log_msg *msg, uint8_t level,
 static void dispatch_to_backends(const struct log_msg *msg)
 {
     for (int i = 0; i < _log_backend_count; i++) {
-        if (_log_backends[i]->active && _log_backends[i]->api->put) {
-            _log_backends[i]->api->put(_log_backends[i], msg);
+        const struct log_backend *b = _log_backends[i];
+        if (b->api->put) {
+            b->api->put(b, msg);
         }
     }
 }
@@ -272,10 +285,48 @@ void zsys_log_msg_emit(uint8_t level, const char *module,
 
 int zsys_log_init(void)
 {
-    /* Initialize all registered backends */
+#if !defined(CONFIG_IDF_TARGET_LINUX)
+    /* Pull log_backend_esp.c out of libzsys.a on ESP targets so its
+     * LOG_BACKEND_DEFINE lands in .log_backends. The reference must survive
+     * both compiler optimization and linker --gc-sections; we do it as a
+     * volatile load inside this function (which is reached), which
+     * guarantees actual runtime code generation that references the symbol.
+     * A file-scope used-attr pointer is insufficient -- --gc-sections still
+     * drops unreferenced exported rodata. */
+    {
+        extern const int zsys_log_backend_esp_anchor;
+        const int * volatile p = &zsys_log_backend_esp_anchor;
+        (void)*p;
+    }
+
+
+    /* ESP target: walk .log_module_entries and .log_backends linker sections
+     * and populate the runtime registries. On Apple, constructors emitted by
+     * the macros have already populated them. */
+    extern const struct zsys_log_module_desc _log_module_entries_start[];
+    extern const struct zsys_log_module_desc _log_module_entries_end[];
+    {
+        const size_t n = (size_t)(_log_module_entries_end -
+                                  _log_module_entries_start);
+        for (size_t i = 0; i < n; i++) {
+            const struct zsys_log_module_desc *m = &_log_module_entries_start[i];
+            esp_log_level_set(m->name, m->default_level);
+            zsys_log_register_module(m->name, m->default_level);
+        }
+    }
+    {
+        const size_t n = (size_t)(_log_backends_end - _log_backends_start);
+        for (size_t i = 0; i < n; i++) {
+            zsys_log_backend_register(&_log_backends_start[i]);
+        }
+    }
+#endif
+
+    /* Initialize registered backends. */
     for (int i = 0; i < _log_backend_count; i++) {
-        if (_log_backends[i]->api->init) {
-            _log_backends[i]->api->init(_log_backends[i]);
+        const struct log_backend *b = _log_backends[i];
+        if (b->api->init) {
+            b->api->init(b);
         }
     }
 
@@ -313,8 +364,9 @@ void zsys_log_panic(void)
 
     /* Notify backends */
     for (int i = 0; i < _log_backend_count; i++) {
-        if (_log_backends[i]->api->panic) {
-            _log_backends[i]->api->panic(_log_backends[i]);
+        const struct log_backend *b = _log_backends[i];
+        if (b->api->panic) {
+            b->api->panic(b);
         }
     }
 }

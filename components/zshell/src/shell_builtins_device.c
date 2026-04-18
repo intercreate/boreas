@@ -79,5 +79,5 @@ static struct shell_static_entry _builtin_device = {
 
 void shell_builtins_device_register(void)
 {
-    _shell_root_cmds[_shell_root_cmd_count++] = &_builtin_device;
+    shell_cmd_register(&_builtin_device);
 }
