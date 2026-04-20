@@ -159,8 +159,8 @@ static uint32_t _log_dropped_count = 0;
 K_MSGQ_DEFINE(_zsys_log_msgq, sizeof(struct log_msg),
               CONFIG_ZSYS_LOG_BUFFER_COUNT, 4);
 
-static K_THREAD_STACK_DEFINE(_log_thread_stack,
-                             CONFIG_ZSYS_LOG_THREAD_STACK_SIZE);
+K_THREAD_STACK_DEFINE(_log_thread_stack,
+                      CONFIG_ZSYS_LOG_THREAD_STACK_SIZE);
 static struct k_thread _log_thread;
 
 static void log_output_thread(void *p1, void *p2, void *p3)
@@ -169,6 +169,7 @@ static void log_output_thread(void *p1, void *p2, void *p3)
     (void)p3;
     (void)p1;
     struct log_msg msg;
+    uint32_t last_dropped = 0;
 
     for (;;) {
         if (k_msgq_get(&_zsys_log_msgq, &msg, K_FOREVER) == 0) {
@@ -178,6 +179,13 @@ static void log_output_thread(void *p1, void *p2, void *p3)
                     b->api->put(b, &msg);
                 }
             }
+        }
+
+        uint32_t dropped = __atomic_load_n(&_log_dropped_count, __ATOMIC_RELAXED);
+        if (dropped != last_dropped) {
+            ESP_LOGW(TAG, "zsys log queue full: %lu message(s) dropped",
+                     (unsigned long)(dropped - last_dropped));
+            last_dropped = dropped;
         }
     }
 }
