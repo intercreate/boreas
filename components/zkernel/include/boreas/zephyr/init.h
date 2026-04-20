@@ -12,8 +12,7 @@
  *   EARLY       -- logging, NVS, hardware ID
  *   STORAGE     -- cert manager, persistent config
  *   DEVICE      -- buses, peripherals (board_init)
- *   AUDIO       -- mixer, codec, tone player
- *   NETWORK     -- WiFi, MQTT, SIP
+ *   NETWORK     -- WiFi, MQTT
  *   APPLICATION -- state machine, CLI, diagnostics
  *
  * Within a level, entries are sorted by priority (lower = earlier).
@@ -40,7 +39,6 @@ enum sys_init_level {
     SYS_INIT_LEVEL_EARLY = 0,
     SYS_INIT_LEVEL_STORAGE,
     SYS_INIT_LEVEL_DEVICE,
-    SYS_INIT_LEVEL_AUDIO,
     SYS_INIT_LEVEL_NETWORK,
     SYS_INIT_LEVEL_APPLICATION,
     SYS_INIT_LEVEL_COUNT,
@@ -69,7 +67,7 @@ struct sys_init_entry {
  * Register an init function.
  *
  * @param _init_fn   Function returning 0 on success.
- * @param _level     One of: EARLY, STORAGE, DEVICE, AUDIO, NETWORK, APPLICATION
+ * @param _level     One of: EARLY, STORAGE, DEVICE, NETWORK, APPLICATION
  * @param _prio      Priority within level (0-255, lower = earlier).
  *
  * NOTE: Place SYS_INIT() in a translation unit that has at least one other

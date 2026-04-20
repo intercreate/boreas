@@ -20,8 +20,6 @@
 
 #if defined(CONFIG_ZSYS_LOG_MODULE)
 
-static const char _level_char[] = { '?', 'E', 'W', 'I', 'D' };
-
 static void esp_backend_init(const struct log_backend *backend)
 {
     (void)backend;
@@ -31,7 +29,6 @@ static void esp_backend_put(const struct log_backend *backend,
                             const struct log_msg *msg)
 {
     (void)backend;
-    uint8_t lvl = (msg->level <= 4) ? msg->level : 0;
 
 #if defined(CONFIG_ZSYS_LOG_MODE_DEFERRED)
     /* Structured format with the original log-time timestamp */
@@ -39,9 +36,12 @@ static void esp_backend_put(const struct log_backend *backend,
     zsys_log_format_msg(msg, buf, sizeof(buf));
     printf("%s\n", buf);
 #else
+    static const char level_char[] = { '?', 'E', 'W', 'I', 'D' };
+    uint8_t lvl = (msg->level <= 4) ? msg->level : 0;
+
     /* Match standard ESP-IDF format: LETTER (timestamp_ms) tag: text */
     printf("%c (%lu) %s: %s\n",
-           _level_char[lvl],
+           level_char[lvl],
            (unsigned long)esp_log_timestamp(),
            msg->module,
            msg->text);
