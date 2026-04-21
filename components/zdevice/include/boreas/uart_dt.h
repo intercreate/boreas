@@ -167,8 +167,9 @@ struct uart_esp32_config {
     int           rx_pin;
     int           rts_pin;
     int           cts_pin;
-    size_t        tx_buf_size;          /* 0 = no TX ring buffer */
+    size_t        tx_buf_size;          /* 0 = no TX ring buffer (poll-only) */
     size_t        rx_buf_size;          /* must be >= UART_HW_FIFO_LEN */
+    int           evt_queue_size;       /* 0 = no event queue (poll-only) */
     int           intr_alloc_flags;
     struct uart_config       default_cfg;
     struct uart_rs485_config rs485;
