@@ -28,4 +28,52 @@ menu "Boreas Device Model (zdevice)"
             Enable the GPIO controller device implementation.
             Wraps ESP-IDF GPIO with Zephyr-style gpio_dt_spec and gpio_api vtable.
 
+    config DEVICE_MODEL_UART
+        bool "Enable UART controller driver"
+        default n
+        help
+            Enable the UART controller device implementation.
+            Wraps ESP-IDF driver/uart with Zephyr-style uart_api vtable.
+            Supports polling, interrupt-driven, and async modes; RS-485
+            half-duplex as a flow_ctrl option. See boreas/uart_dt.h.
+
+    if DEVICE_MODEL_UART
+
+        config UART_INTERRUPT_DRIVEN
+            bool "Enable interrupt-driven UART API"
+            default y
+            help
+                Compile in uart_irq_* and uart_fifo_* helpers. Backed by
+                the ESP-IDF UART event queue; a per-instance event task
+                dispatches IDF events into the registered IRQ callback.
+
+        config UART_ASYNC_API
+            bool "Enable async UART API (uart_tx / uart_rx_enable)"
+            default n
+            help
+                Compile in uart_tx and uart_rx_enable style async helpers
+                that deliver events (UART_TX_DONE, UART_RX_RDY, etc.) via
+                a uart_callback_t. Adds RX buffer management state.
+
+        config UART_RS485
+            bool "Enable RS-485 half-duplex flow control"
+            default n
+            select DEVICE_MODEL_GPIO
+            help
+                Allow uart_config.flow_ctrl = UART_CFG_FLOW_CTRL_RS485.
+                Supports both software DE/RE toggle around TX and ESP32's
+                built-in UART_MODE_RS485_HALF_DUPLEX auto-DE.
+
+        config UART_EVENT_TASK_STACK
+            int "Per-instance UART event task stack bytes"
+            default 2048
+            depends on UART_INTERRUPT_DRIVEN || UART_ASYNC_API
+
+        config UART_EVENT_TASK_PRIO
+            int "Per-instance UART event task priority"
+            default 10
+            depends on UART_INTERRUPT_DRIVEN || UART_ASYNC_API
+
+    endif
+
 endmenu

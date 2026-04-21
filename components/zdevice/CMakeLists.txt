@@ -12,6 +12,10 @@ if(CONFIG_DEVICE_MODEL_GPIO)
     list(APPEND srcs "src/gpio_dt.c")
 endif()
 
+if(CONFIG_DEVICE_MODEL_UART)
+    list(APPEND srcs "src/uart_dt.c")
+endif()
+
 set(requires zkernel zsys)
 
 idf_build_get_property(target IDF_TARGET)
