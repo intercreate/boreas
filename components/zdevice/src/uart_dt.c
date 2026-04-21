@@ -9,24 +9,27 @@
 
 LOG_MODULE_REGISTER(uart_esp32, LOG_LEVEL_INF);
 
-/* Steps 1-2: polling + interrupt-driven API.
+/* Steps 1-3: polling + interrupt-driven + async API.
  *
- * Backed by ESP-IDF driver/uart.h. When CONFIG_UART_INTERRUPT_DRIVEN=y and
- * the instance config has evt_queue_size > 0, uart_esp32_init() spawns a
- * per-instance event task that drains the IDF UART event queue, latches
- * any error events into data->err_flags, and dispatches the registered
- * IRQ callback. This is not a true ISR context -- the callback runs in
- * the event task -- but the observable behavior (fifo_fill/fifo_read,
- * irq_rx_ready/irq_tx_complete) matches Zephyr's contract.
+ * Backed by ESP-IDF driver/uart.h. When evt_queue_size > 0, a per-instance
+ * event task drains the IDF UART event queue, latches any error events
+ * into data->err_flags, and dispatches to whichever mode is active:
+ *
+ *   IRQ mode  (irq_cb set): runs the registered irq_cb in task context.
+ *   Async mode (async_cb set): reads data into the user's RX buffer and
+ *                              emits UART_RX_* events; TX completion is
+ *                              signaled by a second task (uart_esp32_tx_task).
+ *
+ * The two modes are mutually exclusive -- whichever callback is set most
+ * recently takes effect. If both are set, async takes precedence.
  *
  * TX-IRQ limitation: ESP-IDF does not fire a UART_TX_DONE event into the
- * queue when the TX ring drains. irq_tx_enable() kicks the callback once;
- * if the callback does not drain its entire pending data in that call, it
- * must either rely on the TX ring buffer (sized via tx_buf_size) to absorb
- * the burst, or switch to the async API (step 3) which signals UART_TX_DONE
- * via the user callback directly.
+ * event queue when the TX ring drains. irq_tx_enable() kicks the callback
+ * once; if the callback cannot drain everything, rely on the tx_buf_size
+ * ring to absorb the burst, or switch to async mode which signals
+ * UART_TX_DONE from a dedicated waiter task after uart_wait_tx_done().
  *
- * RS-485 and async API land in later steps.
+ * RS-485 support lands in step 4.
  */
 
 #ifndef CONFIG_UART_EVENT_TASK_STACK
@@ -177,6 +180,25 @@ static void latch_err_event(struct uart_esp32_data *d, uart_event_type_t t)
     portEXIT_CRITICAL(&d->lock);
 }
 
+static bool type_is_err(uart_event_type_t t)
+{
+    switch (t) {
+    case UART_FIFO_OVF:
+    case UART_BUFFER_FULL:
+    case UART_BREAK:
+    case UART_PARITY_ERR:
+    case UART_FRAME_ERR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+#if defined(CONFIG_UART_ASYNC_API)
+static void async_dispatch_rx_data(const struct device *dev, size_t avail);
+static void async_signal_stop(const struct device *dev, uint32_t reason);
+#endif
+
 static void uart_esp32_event_task(void *arg)
 {
     const struct device *dev = (const struct device *)arg;
@@ -190,6 +212,16 @@ static void uart_esp32_event_task(void *arg)
 
         latch_err_event(d, evt.type);
 
+#if defined(CONFIG_UART_ASYNC_API)
+        if (d->async_cb != NULL) {
+            if (type_is_err(evt.type) && d->rx_enabled) {
+                async_signal_stop(dev, d->err_flags);
+            } else if (evt.type == UART_DATA && d->rx_enabled) {
+                async_dispatch_rx_data(dev, evt.size);
+            }
+            continue;
+        }
+#endif
         if (d->irq_cb != NULL &&
             (d->irq_rx_enabled || d->irq_tx_enabled)) {
             d->irq_cb(dev, d->irq_user_data);
@@ -286,6 +318,251 @@ static int uart_esp32_fifo_read(const struct device *dev,
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
 /* ----------------------------------------------------------------
+ * Async API
+ *
+ * Event task (shared with IRQ path) performs RX double-buffer handoff:
+ *   UART_DATA  -> read into rx_buf, emit UART_RX_RDY;
+ *                 when buf fills, emit UART_RX_BUF_REQUEST;
+ *                 if user called rx_buf_rsp, swap + emit UART_RX_BUF_RELEASED
+ *                 else stop + emit UART_RX_DISABLED.
+ *   err event  -> emit UART_RX_STOPPED (carries latched err_flags).
+ *
+ * TX path uses a dedicated task (tx_task) that blocks on tx_start_sem,
+ * calls uart_wait_tx_done() after uart_write_bytes() has queued the data,
+ * then emits UART_TX_DONE. This adds one task per UART instance but is
+ * the only way to signal completion reliably -- IDF does not deliver
+ * TX-done through the event queue.
+ * ---------------------------------------------------------------- */
+
+#if defined(CONFIG_UART_ASYNC_API)
+
+static void async_emit(const struct device *dev, struct uart_event *evt)
+{
+    const struct uart_esp32_data *d = dev->data;
+    if (d->async_cb) d->async_cb(dev, evt, d->async_user_data);
+}
+
+static void async_signal_stop(const struct device *dev, uint32_t reason)
+{
+    struct uart_esp32_data *d = dev->data;
+    if (!d->rx_enabled) return;
+    struct uart_event evt = {
+        .type = UART_RX_STOPPED,
+        .data.rx_stop = {
+            .reason = reason,
+            .data   = d->rx_buf,
+            .len    = d->rx_buf_offset,
+        },
+    };
+    async_emit(dev, &evt);
+    /* Also release the buffer and report disabled so user reclaims it */
+    struct uart_event rel = {
+        .type = UART_RX_BUF_RELEASED,
+        .data.rx_buf.buf = d->rx_buf,
+    };
+    async_emit(dev, &rel);
+    d->rx_buf        = NULL;
+    d->rx_buf_len    = 0;
+    d->rx_buf_offset = 0;
+    d->rx_enabled    = false;
+    struct uart_event dis = { .type = UART_RX_DISABLED };
+    async_emit(dev, &dis);
+}
+
+static void async_dispatch_rx_data(const struct device *dev, size_t avail)
+{
+    const struct uart_esp32_config *cfg = dev->config;
+    struct uart_esp32_data *d = dev->data;
+
+    while (avail > 0 && d->rx_enabled && d->rx_buf != NULL) {
+        size_t room = d->rx_buf_len - d->rx_buf_offset;
+        size_t want = (avail < room) ? avail : room;
+        int n = uart_read_bytes(cfg->port,
+                                d->rx_buf + d->rx_buf_offset,
+                                want, 0);
+        if (n <= 0) break;
+
+        struct uart_event ev = {
+            .type = UART_RX_RDY,
+            .data.rx = {
+                .buf    = d->rx_buf,
+                .offset = d->rx_buf_offset,
+                .len    = (size_t)n,
+            },
+        };
+        async_emit(dev, &ev);
+
+        d->rx_buf_offset += (size_t)n;
+        avail -= (size_t)n;
+
+        if (d->rx_buf_offset < d->rx_buf_len) continue;
+
+        /* Current buffer full: request next from user */
+        struct uart_event req = {
+            .type = UART_RX_BUF_REQUEST,
+        };
+        async_emit(dev, &req);
+
+        /* User may have provided next buffer via rx_buf_rsp */
+        uint8_t *old     = d->rx_buf;
+        if (d->rx_buf_next != NULL) {
+            d->rx_buf        = d->rx_buf_next;
+            d->rx_buf_len    = d->rx_buf_next_len;
+            d->rx_buf_offset = 0;
+            d->rx_buf_next   = NULL;
+            d->rx_buf_next_len = 0;
+
+            struct uart_event rel = {
+                .type = UART_RX_BUF_RELEASED,
+                .data.rx_buf.buf = old,
+            };
+            async_emit(dev, &rel);
+        } else {
+            /* No next buffer -- release old, disable RX */
+            struct uart_event rel = {
+                .type = UART_RX_BUF_RELEASED,
+                .data.rx_buf.buf = old,
+            };
+            async_emit(dev, &rel);
+            d->rx_buf        = NULL;
+            d->rx_buf_len    = 0;
+            d->rx_buf_offset = 0;
+            d->rx_enabled    = false;
+            struct uart_event dis = { .type = UART_RX_DISABLED };
+            async_emit(dev, &dis);
+            break;
+        }
+    }
+}
+
+static void uart_esp32_tx_task(void *arg)
+{
+    const struct device *dev = (const struct device *)arg;
+    const struct uart_esp32_config *cfg = dev->config;
+    struct uart_esp32_data *d = dev->data;
+
+    for (;;) {
+        if (xSemaphoreTake(d->tx_start_sem, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        uart_wait_tx_done(cfg->port, portMAX_DELAY);
+
+        const uint8_t *buf = d->tx_buf;
+        size_t         len = d->tx_len;
+        d->tx_buf       = NULL;
+        d->tx_len       = 0;
+        d->tx_in_flight = false;
+
+        struct uart_event evt = {
+            .type = UART_TX_DONE,
+            .data.tx = { .buf = buf, .len = len },
+        };
+        async_emit(dev, &evt);
+    }
+}
+
+static int uart_esp32_callback_set(const struct device *dev,
+                                   uart_callback_t cb, void *user_data)
+{
+    struct uart_esp32_data *d = dev->data;
+    d->async_cb        = cb;
+    d->async_user_data = user_data;
+    return 0;
+}
+
+static int uart_esp32_tx(const struct device *dev, const uint8_t *buf,
+                         size_t len, int32_t timeout_us)
+{
+    (void)timeout_us; /* caller-specified timeout not honored yet */
+    const struct uart_esp32_config *cfg = dev->config;
+    struct uart_esp32_data *d = dev->data;
+
+    if (d->tx_in_flight) return -EBUSY;
+    if (d->tx_start_sem == NULL || d->tx_task == NULL) return -ENOSYS;
+
+    d->tx_buf       = buf;
+    d->tx_len       = len;
+    d->tx_in_flight = true;
+
+    int n = uart_write_bytes(cfg->port, buf, len);
+    if (n < 0) {
+        d->tx_in_flight = false;
+        d->tx_buf       = NULL;
+        d->tx_len       = 0;
+        return -EIO;
+    }
+    /* Kick the tx-done watcher */
+    xSemaphoreGive(d->tx_start_sem);
+    return 0;
+}
+
+static int uart_esp32_tx_abort(const struct device *dev)
+{
+    (void)dev;
+    /* Mid-flight abort of uart_write_bytes is not supported by IDF. */
+    return -ENOSYS;
+}
+
+static int uart_esp32_rx_enable(const struct device *dev, uint8_t *buf,
+                                size_t len, int32_t timeout_us)
+{
+    struct uart_esp32_data *d = dev->data;
+
+    if (d->rx_enabled) return -EBUSY;
+    if (buf == NULL || len == 0) return -EINVAL;
+
+    d->rx_buf        = buf;
+    d->rx_buf_len    = len;
+    d->rx_buf_offset = 0;
+    d->rx_buf_next   = NULL;
+    d->rx_buf_next_len = 0;
+    d->rx_enabled    = true;
+
+    /* IDF rx timeout is in baud-rate-tick units; skip translation for now --
+     * a future revision can convert timeout_us using the configured baud. */
+    (void)timeout_us;
+
+    return 0;
+}
+
+static int uart_esp32_rx_buf_rsp(const struct device *dev, uint8_t *buf,
+                                 size_t len)
+{
+    struct uart_esp32_data *d = dev->data;
+    if (!d->rx_enabled) return -EACCES;
+    if (d->rx_buf_next != NULL) return -EBUSY;
+    d->rx_buf_next     = buf;
+    d->rx_buf_next_len = len;
+    return 0;
+}
+
+static int uart_esp32_rx_disable(const struct device *dev)
+{
+    struct uart_esp32_data *d = dev->data;
+    if (!d->rx_enabled) return -EFAULT;
+
+    uint8_t *old = d->rx_buf;
+    d->rx_enabled    = false;
+    d->rx_buf        = NULL;
+    d->rx_buf_len    = 0;
+    d->rx_buf_offset = 0;
+
+    if (old != NULL) {
+        struct uart_event rel = {
+            .type = UART_RX_BUF_RELEASED,
+            .data.rx_buf.buf = old,
+        };
+        async_emit(dev, &rel);
+    }
+    struct uart_event dis = { .type = UART_RX_DISABLED };
+    async_emit(dev, &dis);
+    return 0;
+}
+
+#endif /* CONFIG_UART_ASYNC_API */
+
+/* ----------------------------------------------------------------
  * Polling I/O
  *
  * poll_in is non-blocking: returns 0 on byte read, -1 when none available.
@@ -365,6 +642,25 @@ esp_err_t uart_esp32_init(const struct device *dev)
     }
 #endif
 
+#if defined(CONFIG_UART_ASYNC_API)
+    if (d->tx_start_sem == NULL) {
+        d->tx_start_sem = xSemaphoreCreateBinary();
+        if (d->tx_start_sem == NULL) return ESP_ERR_NO_MEM;
+    }
+    if (d->tx_task == NULL) {
+        BaseType_t ok = xTaskCreate(uart_esp32_tx_task,
+                                    "uart_tx",
+                                    CONFIG_UART_EVENT_TASK_STACK,
+                                    (void *)dev,
+                                    CONFIG_UART_EVENT_TASK_PRIO,
+                                    &d->tx_task);
+        if (ok != pdPASS) {
+            LOG_ERR("tx task spawn failed for port=%d", cfg->port);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+#endif
+
     LOG_INF("port=%d tx=%d rx=%d baud=%u",
             cfg->port, cfg->tx_pin, cfg->rx_pin,
             (unsigned)cfg->default_cfg.baudrate);
@@ -389,5 +685,12 @@ const struct uart_api uart_esp32_api = {
     .fifo_fill        = uart_esp32_fifo_fill,
     .fifo_read        = uart_esp32_fifo_read,
 #endif
-    /* async slots land in step 3 */
+#if defined(CONFIG_UART_ASYNC_API)
+    .callback_set = uart_esp32_callback_set,
+    .tx           = uart_esp32_tx,
+    .tx_abort     = uart_esp32_tx_abort,
+    .rx_enable    = uart_esp32_rx_enable,
+    .rx_buf_rsp   = uart_esp32_rx_buf_rsp,
+    .rx_disable   = uart_esp32_rx_disable,
+#endif
 };

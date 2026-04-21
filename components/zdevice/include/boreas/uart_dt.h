@@ -189,11 +189,19 @@ struct uart_esp32_data {
     /* Async-mode callback + buffer state */
     uart_callback_t         async_cb;
     void                   *async_user_data;
+    /* RX side */
+    bool                    rx_enabled;
     uint8_t                *rx_buf;
     size_t                  rx_buf_len;
+    size_t                  rx_buf_offset;      /* next write position in rx_buf */
     uint8_t                *rx_buf_next;
     size_t                  rx_buf_next_len;
-    SemaphoreHandle_t       tx_done_sem;
+    /* TX side */
+    bool                    tx_in_flight;
+    const uint8_t          *tx_buf;             /* for UART_TX_DONE event payload */
+    size_t                  tx_len;
+    SemaphoreHandle_t       tx_start_sem;       /* kick tx-done watcher task */
+    TaskHandle_t            tx_task;
 };
 
 extern const struct uart_api uart_esp32_api;
