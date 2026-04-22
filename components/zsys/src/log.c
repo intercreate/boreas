@@ -344,6 +344,7 @@ int zsys_log_init(void)
 
     _log_mode = LOG_MODE_DEFERRED;
 
+    _log_thread.name = "zsys_log";
     k_thread_create(&_log_thread, _log_thread_stack,
                     CONFIG_ZSYS_LOG_THREAD_STACK_SIZE,
                     log_output_thread, NULL, NULL, NULL,

@@ -80,9 +80,12 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack,
 
 void k_thread_name_set(struct k_thread *thread, const char *name)
 {
+    /* Stored for diagnostics only. FreeRTOS does not support renaming a
+     * task after creation, and the FreeRTOS task name (used by vTaskList
+     * and similar tooling) is fixed at xTaskCreate time. To get a
+     * meaningful name in tooling, set thread->name BEFORE calling
+     * k_thread_create(). */
     thread->name = name;
-    /* FreeRTOS doesn't support renaming after creation,
-     * but we store it for diagnostics */
 }
 
 void k_thread_abort(struct k_thread *thread)
