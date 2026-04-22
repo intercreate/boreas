@@ -9,7 +9,7 @@
 
 LOG_MODULE_REGISTER(uart_esp32, LOG_LEVEL_INF);
 
-/* Steps 1-3: polling + interrupt-driven + async API.
+/* Steps 1-4: polling + interrupt-driven + async API + RS-485.
  *
  * Backed by ESP-IDF driver/uart.h. When evt_queue_size > 0, a per-instance
  * event task drains the IDF UART event queue, latches any error events
@@ -29,7 +29,18 @@ LOG_MODULE_REGISTER(uart_esp32, LOG_LEVEL_INF);
  * ring to absorb the burst, or switch to async mode which signals
  * UART_TX_DONE from a dedicated waiter task after uart_wait_tx_done().
  *
- * RS-485 support lands in step 4.
+ * RS-485: two modes, selected by rs485.hw_auto.
+ *   SW mode: uart_esp32_init() configures rs485.de (and rs485.re if split)
+ *            as outputs and parks them in the receive state. The async
+ *            TX path brackets uart_write_bytes() with DE assert + setup
+ *            delay up front, and DE deassert + hold delay after
+ *            uart_wait_tx_done() (which keys off shift-register drain,
+ *            not FIFO empty). IRQ and polling TX do NOT toggle DE; for
+ *            those modes the application must manage DE itself (polling)
+ *            or use the async API (recommended).
+ *   HW mode: uart_set_mode(UART_MODE_RS485_HALF_DUPLEX) -- the ESP32 UART
+ *            drives RTS as DE automatically. DE must be the UART's RTS
+ *            pin; pre/post delays are 0 or 1 bit-time only.
  */
 
 #ifndef CONFIG_UART_EVENT_TASK_STACK
@@ -38,6 +49,91 @@ LOG_MODULE_REGISTER(uart_esp32, LOG_LEVEL_INF);
 #ifndef CONFIG_UART_EVENT_TASK_PRIO
 #define CONFIG_UART_EVENT_TASK_PRIO 10
 #endif
+
+#if defined(CONFIG_UART_RS485)
+
+/* RS-485 DE/RE helpers (software mode only).
+ *
+ * If rs485.re.port is NULL, DE and RE are assumed tied together (most
+ * common -- single pin, active high for TX). When separate, they are
+ * driven opposite: DE=1 RE=1 during TX (RE disabled, active low), DE=0
+ * RE=0 during RX.
+ */
+static bool rs485_sw_active(const struct uart_esp32_config *cfg)
+{
+    return cfg->default_cfg.flow_ctrl == UART_CFG_FLOW_CTRL_RS485 &&
+           !cfg->rs485.hw_auto &&
+           cfg->rs485.de.port != NULL;
+}
+
+static void rs485_park_rx(const struct uart_esp32_config *cfg)
+{
+    if (!rs485_sw_active(cfg)) return;
+    gpio_pin_set_dt(&cfg->rs485.de, 0);
+    if (cfg->rs485.re.port != NULL) {
+        gpio_pin_set_dt(&cfg->rs485.re, 0);
+    }
+}
+
+static void rs485_assert_tx(const struct uart_esp32_config *cfg)
+{
+    if (!rs485_sw_active(cfg)) return;
+    if (cfg->rs485.re.port != NULL) {
+        gpio_pin_set_dt(&cfg->rs485.re, 1);
+    }
+    gpio_pin_set_dt(&cfg->rs485.de, 1);
+    if (cfg->rs485.de_assert_us > 0) {
+        esp_rom_delay_us(cfg->rs485.de_assert_us);
+    }
+}
+
+static void rs485_deassert_tx(const struct uart_esp32_config *cfg)
+{
+    if (!rs485_sw_active(cfg)) return;
+    if (cfg->rs485.de_deassert_us > 0) {
+        esp_rom_delay_us(cfg->rs485.de_deassert_us);
+    }
+    gpio_pin_set_dt(&cfg->rs485.de, 0);
+    if (cfg->rs485.re.port != NULL) {
+        gpio_pin_set_dt(&cfg->rs485.re, 0);
+    }
+}
+
+static esp_err_t rs485_init(const struct uart_esp32_config *cfg)
+{
+    if (cfg->default_cfg.flow_ctrl != UART_CFG_FLOW_CTRL_RS485) return ESP_OK;
+
+    if (cfg->rs485.hw_auto) {
+        return uart_set_mode(cfg->port, UART_MODE_RS485_HALF_DUPLEX);
+    }
+    if (cfg->rs485.de.port == NULL) {
+        LOG_ERR("RS-485 SW mode requires rs485.de.port");
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = gpio_pin_configure_dt(&cfg->rs485.de, GPIO_DT_OUTPUT);
+    if (err != ESP_OK) return err;
+    if (cfg->rs485.re.port != NULL) {
+        err = gpio_pin_configure_dt(&cfg->rs485.re, GPIO_DT_OUTPUT);
+        if (err != ESP_OK) return err;
+    }
+    rs485_park_rx(cfg);
+    return ESP_OK;
+}
+
+#else /* !CONFIG_UART_RS485 */
+
+static inline void rs485_assert_tx(const struct uart_esp32_config *cfg)   { (void)cfg; }
+static inline void rs485_deassert_tx(const struct uart_esp32_config *cfg) { (void)cfg; }
+static inline esp_err_t rs485_init(const struct uart_esp32_config *cfg)
+{
+    if (cfg->default_cfg.flow_ctrl == UART_CFG_FLOW_CTRL_RS485) {
+        LOG_ERR("flow_ctrl=RS485 requested but CONFIG_UART_RS485=n");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return ESP_OK;
+}
+
+#endif /* CONFIG_UART_RS485 */
 
 static esp_err_t apply_config(uart_port_t port, const struct uart_config *cfg)
 {
@@ -180,6 +276,10 @@ static void latch_err_event(struct uart_esp32_data *d, uart_event_type_t t)
     portEXIT_CRITICAL(&d->lock);
 }
 
+#if defined(CONFIG_UART_ASYNC_API)
+static void async_dispatch_rx_data(const struct device *dev, size_t avail);
+static void async_signal_stop(const struct device *dev, uint32_t reason);
+
 static bool type_is_err(uart_event_type_t t)
 {
     switch (t) {
@@ -193,10 +293,6 @@ static bool type_is_err(uart_event_type_t t)
         return false;
     }
 }
-
-#if defined(CONFIG_UART_ASYNC_API)
-static void async_dispatch_rx_data(const struct device *dev, size_t avail);
-static void async_signal_stop(const struct device *dev, uint32_t reason);
 #endif
 
 static void uart_esp32_event_task(void *arg)
@@ -447,6 +543,7 @@ static void uart_esp32_tx_task(void *arg)
         }
 
         uart_wait_tx_done(cfg->port, portMAX_DELAY);
+        rs485_deassert_tx(cfg);
 
         const uint8_t *buf = d->tx_buf;
         size_t         len = d->tx_len;
@@ -485,8 +582,11 @@ static int uart_esp32_tx(const struct device *dev, const uint8_t *buf,
     d->tx_len       = len;
     d->tx_in_flight = true;
 
+    rs485_assert_tx(cfg);
+
     int n = uart_write_bytes(cfg->port, buf, len);
     if (n < 0) {
+        rs485_deassert_tx(cfg);
         d->tx_in_flight = false;
         d->tx_buf       = NULL;
         d->tx_len       = 0;
@@ -624,6 +724,12 @@ esp_err_t uart_esp32_init(const struct device *dev)
                        cfg->rts_pin, cfg->cts_pin);
     if (err != ESP_OK) {
         LOG_ERR("set_pin failed: %d", err);
+        return err;
+    }
+
+    err = rs485_init(cfg);
+    if (err != ESP_OK) {
+        LOG_ERR("rs485_init failed: %d", err);
         return err;
     }
 
