@@ -68,6 +68,10 @@ menu "Boreas Device Model (zdevice)"
             int "Per-instance UART event task stack bytes"
             default 2048
             depends on UART_INTERRUPT_DRIVEN || UART_ASYNC_API
+            help
+                Stack size in bytes. Passed directly to xTaskCreate(),
+                which on ESP-IDF FreeRTOS takes bytes (not words, unlike
+                vanilla FreeRTOS -- see task.h usStackDepth docs).
 
         config UART_EVENT_TASK_PRIO
             int "Per-instance UART event task priority"

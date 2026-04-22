@@ -406,7 +406,7 @@ static void latch_err_event(struct uart_esp32_data *d, uart_event_type_t t)
         set = UART_ERROR_OVERRUN;
         break;
     case UART_BREAK:
-        set = UART_BREAK;
+        set = UART_ERROR_BREAK;
         break;
     case UART_PARITY_ERR:
         set = UART_ERROR_PARITY;
@@ -569,7 +569,7 @@ static int uart_esp32_fifo_fill(const struct device *dev,
         n = uart_tx_chars(cfg->port, (const char *)buf, len);
     } else {
         /* Ring-backed; may be short if the ring is full. */
-        n = uart_write_bytes(cfg->port, buf, (size_t)len);
+        n = uart_write_bytes(cfg->port, (const char *)buf, (size_t)len);
     }
     return (n < 0) ? 0 : n;
 }
@@ -808,8 +808,12 @@ static int uart_esp32_tx(const struct device *dev, const uint8_t *buf,
 
     rs485_assert_tx(cfg);
 
-    n = uart_write_bytes(cfg->port, buf, len);
-    if (n < 0) {
+    /* uart_write_bytes blocks until all bytes are queued into the TX ring
+     * (not the HW FIFO), so a short return is a hard error. Treat anything
+     * other than exact-length success as failure rather than emitting a
+     * misleading UART_TX_DONE for bytes that were dropped. */
+    n = uart_write_bytes(cfg->port, (const char *)buf, len);
+    if (n != (int)len) {
         rs485_deassert_tx(cfg);
         d->tx_in_flight = false;
         d->tx_buf       = NULL;
@@ -859,8 +863,17 @@ static int uart_esp32_rx_buf_rsp(const struct device *dev, uint8_t *buf,
 {
     struct uart_esp32_data *d = dev->data;
 
+    if (buf == NULL || len == 0) {
+        return -EINVAL;
+    }
     if (!d->rx_enabled) {
         return -ENOSYS;  /* RX not active */
+    }
+    /* Re-supplying the currently-active buffer would make the eventual
+     * UART_RX_BUF_RELEASED for it ambiguous (driver is still writing to
+     * it). Require a distinct buffer. */
+    if (buf == d->rx_buf) {
+        return -EINVAL;
     }
     if (d->rx_buf_next != NULL) {
         return -EBUSY;
@@ -917,14 +930,26 @@ static int uart_esp32_rx_disable(const struct device *dev)
 static int uart_esp32_poll_in(const struct device *dev, unsigned char *c)
 {
     const struct uart_esp32_config *cfg = dev->config;
-    int n = uart_read_bytes(cfg->port, c, 1, 0);
+    size_t avail = 0;
+    int n;
+
+    /* With an event queue installed, uart_read_bytes(.., ticks=0) takes an
+     * internal semaphore that can lag behind ring state -- the event task
+     * consumes UART_DATA notifications, so a byte may be in the ring with
+     * the read-semaphore still not given. Check ring length directly for
+     * a reliable non-blocking poll, then read with a 1-tick wait since
+     * we've already confirmed data is present. */
+    if (uart_get_buffered_data_len(cfg->port, &avail) != ESP_OK || avail == 0) {
+        return -1;
+    }
+    n = uart_read_bytes(cfg->port, c, 1, 1);
     return (n == 1) ? 0 : -1;
 }
 
 static void uart_esp32_poll_out(const struct device *dev, unsigned char c)
 {
     const struct uart_esp32_config *cfg = dev->config;
-    uart_write_bytes(cfg->port, &c, 1);
+    uart_write_bytes(cfg->port, (const char *)&c, 1);
 }
 
 /* ----------------------------------------------------------------

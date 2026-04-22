@@ -54,7 +54,7 @@ extern "C" {
 #define UART_ERROR_OVERRUN   (1u << 0)
 #define UART_ERROR_PARITY    (1u << 1)
 #define UART_ERROR_FRAMING   (1u << 2)
-#define UART_BREAK           (1u << 3)
+#define UART_ERROR_BREAK     (1u << 3)
 #define UART_ERROR_COLLISION (1u << 4)
 #define UART_ERROR_NOISE     (1u << 5)
 
