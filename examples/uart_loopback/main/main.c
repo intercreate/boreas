@@ -237,6 +237,11 @@ void app_main(void)
         return;
     }
 
+    /* Enabling loopback after uart_set_pin can latch a spurious byte on RX
+     * from the TX-pin state transition. Let the line settle, then flush. */
+    k_msleep(5);
+    uart_flush_input(UART_NUM_1);
+
     int pass = 0, total = 3;
 
     pass += phase_polling() ? 1 : 0;

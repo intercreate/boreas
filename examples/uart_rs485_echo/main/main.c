@@ -79,7 +79,11 @@ DEVICE_DEFINE(uart1, uart_esp32_init, &uart_esp32_api,
 
 #define RX_BUF_SIZE 128
 
-static uint8_t rx_buf[RX_BUF_SIZE];
+/* Ping-pong RX buffers: the driver is writing into one while the other is
+ * queued for the next BUF_REQUEST. We flip on every BUF_RELEASED. */
+static uint8_t rx_buf_a[RX_BUF_SIZE];
+static uint8_t rx_buf_b[RX_BUF_SIZE];
+static uint8_t *rx_pending = rx_buf_b;  /* buf_a starts active, buf_b waits */
 
 /* Reply prefix; sized so prefix + up to RX_BUF_SIZE bytes fits. */
 static uint8_t tx_frame[6 + RX_BUF_SIZE];
@@ -121,14 +125,13 @@ static void async_cb(const struct device *dev, struct uart_event *evt,
                     evt->data.rx.len);
         break;
     case UART_RX_BUF_REQUEST:
-        /* Keep feeding the same buffer -- simple ring behavior. When
-         * the current buffer fills we'll get a BUF_REQUEST; providing
-         * the same pointer means RX_BUF_RELEASED will fire for it,
-         * and RX continues into the re-provided buffer. */
-        uart_rx_buf_rsp(&uart1, rx_buf, sizeof(rx_buf));
+        /* Queue whichever buffer is not currently active. Flipped on
+         * BUF_RELEASED below. */
+        uart_rx_buf_rsp(&uart1, rx_pending, RX_BUF_SIZE);
         break;
     case UART_RX_BUF_RELEASED:
-        /* Ignored -- rx_buf is static. */
+        /* Released buffer is now free to hand back on the next request. */
+        rx_pending = (evt->data.rx_buf.buf == rx_buf_a) ? rx_buf_a : rx_buf_b;
         break;
     case UART_RX_DISABLED:
         LOG_WRN("RX disabled");
@@ -136,8 +139,9 @@ static void async_cb(const struct device *dev, struct uart_event *evt,
     case UART_RX_STOPPED:
         LOG_ERR("RX stopped, reason=0x%x",
                 (unsigned)evt->data.rx_stop.reason);
-        /* Attempt recovery: re-enable RX. */
-        uart_rx_enable(&uart1, rx_buf, sizeof(rx_buf), 0);
+        /* Attempt recovery: re-enable RX and reset the ping-pong. */
+        rx_pending = rx_buf_b;
+        uart_rx_enable(&uart1, rx_buf_a, RX_BUF_SIZE, 0);
         break;
     }
 }
@@ -165,7 +169,7 @@ void app_main(void)
         LOG_ERR("callback_set failed");
         return;
     }
-    if (uart_rx_enable(&uart1, rx_buf, sizeof(rx_buf), 0) != 0) {
+    if (uart_rx_enable(&uart1, rx_buf_a, RX_BUF_SIZE, 0) != 0) {
         LOG_ERR("rx_enable failed");
         return;
     }
