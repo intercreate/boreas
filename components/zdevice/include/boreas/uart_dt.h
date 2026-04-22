@@ -12,6 +12,7 @@
  */
 #pragma once
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -181,6 +182,7 @@ struct uart_esp32_data {
     TaskHandle_t            evt_task;
     uint32_t                err_flags;          /* latched, cleared by err_check */
     portMUX_TYPE            lock;
+    uint8_t                 current_flow_ctrl;  /* tracks RS-485 across configure() */
     /* IRQ-mode callback (populated by irq_callback_set) */
     uart_irq_callback_t     irq_cb;
     void                   *irq_user_data;
@@ -210,14 +212,17 @@ esp_err_t uart_esp32_init(const struct device *dev);
 /* ----------------------------------------------------------------
  * Inline helpers -- Zephyr-compatible call shape.
  *
- * Unimplemented modes return -ENOSYS (errno value 88 on ESP-IDF/newlib).
+ * Helpers for modes that aren't compiled in return -ENOSYS.
  * ---------------------------------------------------------------- */
 
 static inline int uart_configure(const struct device *dev,
                                  const struct uart_config *cfg)
 {
     const struct uart_api *api = dev->api;
-    if (!api->configure) return -88;
+
+    if (api->configure == NULL) {
+        return -ENOSYS;
+    }
     return api->configure(dev, cfg);
 }
 
@@ -225,28 +230,40 @@ static inline int uart_config_get(const struct device *dev,
                                   struct uart_config *cfg)
 {
     const struct uart_api *api = dev->api;
-    if (!api->config_get) return -88;
+
+    if (api->config_get == NULL) {
+        return -ENOSYS;
+    }
     return api->config_get(dev, cfg);
 }
 
 static inline int uart_err_check(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (!api->err_check) return -88;
+
+    if (api->err_check == NULL) {
+        return -ENOSYS;
+    }
     return api->err_check(dev);
 }
 
 static inline int uart_poll_in(const struct device *dev, unsigned char *c)
 {
     const struct uart_api *api = dev->api;
-    if (!api->poll_in) return -88;
+
+    if (api->poll_in == NULL) {
+        return -ENOSYS;
+    }
     return api->poll_in(dev, c);
 }
 
 static inline void uart_poll_out(const struct device *dev, unsigned char c)
 {
     const struct uart_api *api = dev->api;
-    if (api->poll_out) api->poll_out(dev, c);
+
+    if (api->poll_out != NULL) {
+        api->poll_out(dev, c);
+    }
 }
 
 /* Interrupt-driven helpers */
@@ -256,51 +273,75 @@ static inline void uart_irq_callback_user_data_set(const struct device *dev,
                                                    void *user_data)
 {
     const struct uart_api *api = dev->api;
-    if (api->irq_callback_set) api->irq_callback_set(dev, cb, user_data);
+
+    if (api->irq_callback_set != NULL) {
+        api->irq_callback_set(dev, cb, user_data);
+    }
 }
 
 static inline void uart_irq_tx_enable(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (api->irq_tx_enable) api->irq_tx_enable(dev);
+
+    if (api->irq_tx_enable != NULL) {
+        api->irq_tx_enable(dev);
+    }
 }
 
 static inline void uart_irq_tx_disable(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (api->irq_tx_disable) api->irq_tx_disable(dev);
+
+    if (api->irq_tx_disable != NULL) {
+        api->irq_tx_disable(dev);
+    }
 }
 
 static inline int uart_irq_tx_ready(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (!api->irq_tx_ready) return -88;
+
+    if (api->irq_tx_ready == NULL) {
+        return -ENOSYS;
+    }
     return api->irq_tx_ready(dev);
 }
 
 static inline int uart_irq_tx_complete(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (!api->irq_tx_complete) return -88;
+
+    if (api->irq_tx_complete == NULL) {
+        return -ENOSYS;
+    }
     return api->irq_tx_complete(dev);
 }
 
 static inline void uart_irq_rx_enable(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (api->irq_rx_enable) api->irq_rx_enable(dev);
+
+    if (api->irq_rx_enable != NULL) {
+        api->irq_rx_enable(dev);
+    }
 }
 
 static inline void uart_irq_rx_disable(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (api->irq_rx_disable) api->irq_rx_disable(dev);
+
+    if (api->irq_rx_disable != NULL) {
+        api->irq_rx_disable(dev);
+    }
 }
 
 static inline int uart_irq_rx_ready(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (!api->irq_rx_ready) return -88;
+
+    if (api->irq_rx_ready == NULL) {
+        return -ENOSYS;
+    }
     return api->irq_rx_ready(dev);
 }
 
@@ -308,7 +349,10 @@ static inline int uart_fifo_fill(const struct device *dev,
                                  const uint8_t *buf, int len)
 {
     const struct uart_api *api = dev->api;
-    if (!api->fifo_fill) return -88;
+
+    if (api->fifo_fill == NULL) {
+        return -ENOSYS;
+    }
     return api->fifo_fill(dev, buf, len);
 }
 
@@ -316,7 +360,10 @@ static inline int uart_fifo_read(const struct device *dev,
                                  uint8_t *buf, int len)
 {
     const struct uart_api *api = dev->api;
-    if (!api->fifo_read) return -88;
+
+    if (api->fifo_read == NULL) {
+        return -ENOSYS;
+    }
     return api->fifo_read(dev, buf, len);
 }
 
@@ -326,7 +373,10 @@ static inline int uart_callback_set(const struct device *dev,
                                     uart_callback_t cb, void *user_data)
 {
     const struct uart_api *api = dev->api;
-    if (!api->callback_set) return -88;
+
+    if (api->callback_set == NULL) {
+        return -ENOSYS;
+    }
     return api->callback_set(dev, cb, user_data);
 }
 
@@ -334,14 +384,20 @@ static inline int uart_tx(const struct device *dev, const uint8_t *buf,
                           size_t len, int32_t timeout_us)
 {
     const struct uart_api *api = dev->api;
-    if (!api->tx) return -88;
+
+    if (api->tx == NULL) {
+        return -ENOSYS;
+    }
     return api->tx(dev, buf, len, timeout_us);
 }
 
 static inline int uart_tx_abort(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (!api->tx_abort) return -88;
+
+    if (api->tx_abort == NULL) {
+        return -ENOSYS;
+    }
     return api->tx_abort(dev);
 }
 
@@ -349,7 +405,10 @@ static inline int uart_rx_enable(const struct device *dev, uint8_t *buf,
                                  size_t len, int32_t timeout_us)
 {
     const struct uart_api *api = dev->api;
-    if (!api->rx_enable) return -88;
+
+    if (api->rx_enable == NULL) {
+        return -ENOSYS;
+    }
     return api->rx_enable(dev, buf, len, timeout_us);
 }
 
@@ -357,14 +416,20 @@ static inline int uart_rx_buf_rsp(const struct device *dev, uint8_t *buf,
                                   size_t len)
 {
     const struct uart_api *api = dev->api;
-    if (!api->rx_buf_rsp) return -88;
+
+    if (api->rx_buf_rsp == NULL) {
+        return -ENOSYS;
+    }
     return api->rx_buf_rsp(dev, buf, len);
 }
 
 static inline int uart_rx_disable(const struct device *dev)
 {
     const struct uart_api *api = dev->api;
-    if (!api->rx_disable) return -88;
+
+    if (api->rx_disable == NULL) {
+        return -ENOSYS;
+    }
     return api->rx_disable(dev);
 }
 

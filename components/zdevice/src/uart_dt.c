@@ -9,9 +9,13 @@
 
 LOG_MODULE_REGISTER(uart_esp32, LOG_LEVEL_INF);
 
-/* Steps 1-4: polling + interrupt-driven + async API + RS-485.
+/* Zephyr-compatible UART driver over ESP-IDF driver/uart.h.
  *
- * Backed by ESP-IDF driver/uart.h. When evt_queue_size > 0, a per-instance
+ * Supports polling, interrupt-driven, and async modes (gated by Kconfig),
+ * plus RS-485 half-duplex flow control via either software DE/RE GPIO
+ * toggling or ESP32 hardware auto-DE.
+ *
+ * When evt_queue_size > 0, a per-instance
  * event task drains the IDF UART event queue, latches any error events
  * into data->err_flags, and dispatches to whichever mode is active:
  *
@@ -28,6 +32,11 @@ LOG_MODULE_REGISTER(uart_esp32, LOG_LEVEL_INF);
  * once; if the callback cannot drain everything, rely on the tx_buf_size
  * ring to absorb the burst, or switch to async mode which signals
  * UART_TX_DONE from a dedicated waiter task after uart_wait_tx_done().
+ *
+ * IRQ-callback context note: the registered irq_cb may run either in
+ * the event task (on RX or error events) or in the caller's context
+ * (the one-shot kick from irq_tx_enable()). Treat it as "some task
+ * context" -- do not assume a specific thread.
  *
  * RS-485: two modes, selected by rs485.hw_auto.
  *   SW mode: uart_esp32_init() configures rs485.de (and rs485.re if split)
@@ -68,7 +77,9 @@ static bool rs485_sw_active(const struct uart_esp32_config *cfg)
 
 static void rs485_park_rx(const struct uart_esp32_config *cfg)
 {
-    if (!rs485_sw_active(cfg)) return;
+    if (!rs485_sw_active(cfg)) {
+        return;
+    }
     gpio_pin_set_dt(&cfg->rs485.de, 0);
     if (cfg->rs485.re.port != NULL) {
         gpio_pin_set_dt(&cfg->rs485.re, 0);
@@ -77,7 +88,9 @@ static void rs485_park_rx(const struct uart_esp32_config *cfg)
 
 static void rs485_assert_tx(const struct uart_esp32_config *cfg)
 {
-    if (!rs485_sw_active(cfg)) return;
+    if (!rs485_sw_active(cfg)) {
+        return;
+    }
     if (cfg->rs485.re.port != NULL) {
         gpio_pin_set_dt(&cfg->rs485.re, 1);
     }
@@ -89,7 +102,9 @@ static void rs485_assert_tx(const struct uart_esp32_config *cfg)
 
 static void rs485_deassert_tx(const struct uart_esp32_config *cfg)
 {
-    if (!rs485_sw_active(cfg)) return;
+    if (!rs485_sw_active(cfg)) {
+        return;
+    }
     if (cfg->rs485.de_deassert_us > 0) {
         esp_rom_delay_us(cfg->rs485.de_deassert_us);
     }
@@ -99,9 +114,11 @@ static void rs485_deassert_tx(const struct uart_esp32_config *cfg)
     }
 }
 
-static esp_err_t rs485_init(const struct uart_esp32_config *cfg)
+/* Enable RS-485 mode on the port. Caller has already decided the
+ * mode applies (from default_cfg at init, or from a runtime configure()). */
+static esp_err_t rs485_enable(const struct uart_esp32_config *cfg)
 {
-    if (cfg->default_cfg.flow_ctrl != UART_CFG_FLOW_CTRL_RS485) return ESP_OK;
+    esp_err_t err;
 
     if (cfg->rs485.hw_auto) {
         return uart_set_mode(cfg->port, UART_MODE_RS485_HALF_DUPLEX);
@@ -110,11 +127,15 @@ static esp_err_t rs485_init(const struct uart_esp32_config *cfg)
         LOG_ERR("RS-485 SW mode requires rs485.de.port");
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t err = gpio_pin_configure_dt(&cfg->rs485.de, GPIO_DT_OUTPUT);
-    if (err != ESP_OK) return err;
+    err = gpio_pin_configure_dt(&cfg->rs485.de, GPIO_DT_OUTPUT);
+    if (err != ESP_OK) {
+        return err;
+    }
     if (cfg->rs485.re.port != NULL) {
         err = gpio_pin_configure_dt(&cfg->rs485.re, GPIO_DT_OUTPUT);
-        if (err != ESP_OK) return err;
+        if (err != ESP_OK) {
+            return err;
+        }
     }
     rs485_park_rx(cfg);
     return ESP_OK;
@@ -124,13 +145,12 @@ static esp_err_t rs485_init(const struct uart_esp32_config *cfg)
 
 static inline void rs485_assert_tx(const struct uart_esp32_config *cfg)   { (void)cfg; }
 static inline void rs485_deassert_tx(const struct uart_esp32_config *cfg) { (void)cfg; }
-static inline esp_err_t rs485_init(const struct uart_esp32_config *cfg)
+static inline void rs485_park_rx(const struct uart_esp32_config *cfg)     { (void)cfg; }
+static inline esp_err_t rs485_enable(const struct uart_esp32_config *cfg)
 {
-    if (cfg->default_cfg.flow_ctrl == UART_CFG_FLOW_CTRL_RS485) {
-        LOG_ERR("flow_ctrl=RS485 requested but CONFIG_UART_RS485=n");
-        return ESP_ERR_NOT_SUPPORTED;
-    }
-    return ESP_OK;
+    (void)cfg;
+    LOG_ERR("flow_ctrl=RS485 requested but CONFIG_UART_RS485=n");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 #endif /* CONFIG_UART_RS485 */
@@ -138,39 +158,72 @@ static inline esp_err_t rs485_init(const struct uart_esp32_config *cfg)
 static esp_err_t apply_config(uart_port_t port, const struct uart_config *cfg)
 {
     uart_word_length_t wl;
-    switch (cfg->data_bits) {
-    case UART_CFG_DATA_BITS_5: wl = UART_DATA_5_BITS; break;
-    case UART_CFG_DATA_BITS_6: wl = UART_DATA_6_BITS; break;
-    case UART_CFG_DATA_BITS_7: wl = UART_DATA_7_BITS; break;
-    case UART_CFG_DATA_BITS_8: wl = UART_DATA_8_BITS; break;
-    default: return ESP_ERR_INVALID_ARG;
-    }
-
     uart_parity_t par;
-    switch (cfg->parity) {
-    case UART_CFG_PARITY_NONE: par = UART_PARITY_DISABLE; break;
-    case UART_CFG_PARITY_EVEN: par = UART_PARITY_EVEN;    break;
-    case UART_CFG_PARITY_ODD:  par = UART_PARITY_ODD;     break;
-    default: return ESP_ERR_INVALID_ARG;
-    }
-
     uart_stop_bits_t sb;
-    switch (cfg->stop_bits) {
-    case UART_CFG_STOP_BITS_1:   sb = UART_STOP_BITS_1;   break;
-    case UART_CFG_STOP_BITS_1_5: sb = UART_STOP_BITS_1_5; break;
-    case UART_CFG_STOP_BITS_2:   sb = UART_STOP_BITS_2;   break;
-    default: return ESP_ERR_INVALID_ARG;
-    }
-
     uart_hw_flowcontrol_t fc;
-    switch (cfg->flow_ctrl) {
-    case UART_CFG_FLOW_CTRL_NONE:    fc = UART_HW_FLOWCTRL_DISABLE; break;
-    case UART_CFG_FLOW_CTRL_RTS_CTS: fc = UART_HW_FLOWCTRL_CTS_RTS; break;
-    case UART_CFG_FLOW_CTRL_RS485:   fc = UART_HW_FLOWCTRL_DISABLE; break; /* handled via uart_set_mode in step 4 */
-    default: return ESP_ERR_INVALID_ARG;
+    uart_config_t ic;
+
+    switch (cfg->data_bits) {
+    case UART_CFG_DATA_BITS_5:
+        wl = UART_DATA_5_BITS;
+        break;
+    case UART_CFG_DATA_BITS_6:
+        wl = UART_DATA_6_BITS;
+        break;
+    case UART_CFG_DATA_BITS_7:
+        wl = UART_DATA_7_BITS;
+        break;
+    case UART_CFG_DATA_BITS_8:
+        wl = UART_DATA_8_BITS;
+        break;
+    default:
+        return ESP_ERR_INVALID_ARG;
     }
 
-    uart_config_t ic = {
+    switch (cfg->parity) {
+    case UART_CFG_PARITY_NONE:
+        par = UART_PARITY_DISABLE;
+        break;
+    case UART_CFG_PARITY_EVEN:
+        par = UART_PARITY_EVEN;
+        break;
+    case UART_CFG_PARITY_ODD:
+        par = UART_PARITY_ODD;
+        break;
+    default:
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    switch (cfg->stop_bits) {
+    case UART_CFG_STOP_BITS_1:
+        sb = UART_STOP_BITS_1;
+        break;
+    case UART_CFG_STOP_BITS_1_5:
+        sb = UART_STOP_BITS_1_5;
+        break;
+    case UART_CFG_STOP_BITS_2:
+        sb = UART_STOP_BITS_2;
+        break;
+    default:
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    switch (cfg->flow_ctrl) {
+    case UART_CFG_FLOW_CTRL_NONE:
+        fc = UART_HW_FLOWCTRL_DISABLE;
+        break;
+    case UART_CFG_FLOW_CTRL_RTS_CTS:
+        fc = UART_HW_FLOWCTRL_CTS_RTS;
+        break;
+    case UART_CFG_FLOW_CTRL_RS485:
+        /* RS-485 is a separate mode, see rs485_enable. */
+        fc = UART_HW_FLOWCTRL_DISABLE;
+        break;
+    default:
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ic = (uart_config_t){
         .baud_rate  = (int)cfg->baudrate,
         .data_bits  = wl,
         .parity     = par,
@@ -185,101 +238,149 @@ static int uart_esp32_configure(const struct device *dev,
                                 const struct uart_config *cfg)
 {
     const struct uart_esp32_config *c = dev->config;
-    esp_err_t err = apply_config(c->port, cfg);
-    return (err == ESP_OK) ? 0 : -EIO;
+    struct uart_esp32_data *d = dev->data;
+    esp_err_t err;
+    uint8_t prev;
+    uint8_t next;
+
+    err = apply_config(c->port, cfg);
+    if (err != ESP_OK) {
+        return -EIO;
+    }
+
+    /* Handle RS-485 mode transitions so flow_ctrl is effectful at
+     * runtime, not just at device_init. Entering RS-485 wires up DE/RE
+     * (or HW auto-DE); leaving it parks DE in RX and returns the UART
+     * to standard mode. */
+    prev = d->current_flow_ctrl;
+    next = cfg->flow_ctrl;
+
+    if (next == UART_CFG_FLOW_CTRL_RS485 && prev != UART_CFG_FLOW_CTRL_RS485) {
+        err = rs485_enable(c);
+        if (err != ESP_OK) {
+            return -EIO;
+        }
+    } else if (prev == UART_CFG_FLOW_CTRL_RS485 &&
+               next != UART_CFG_FLOW_CTRL_RS485) {
+        uart_set_mode(c->port, UART_MODE_UART);
+        rs485_park_rx(c);
+    }
+
+    d->current_flow_ctrl = next;
+    return 0;
 }
 
 static int uart_esp32_config_get(const struct device *dev,
                                  struct uart_config *cfg)
 {
     const struct uart_esp32_config *c = dev->config;
+    struct uart_esp32_data *d = dev->data;
     uart_port_t port = c->port;
-
     uint32_t baud = 0;
-    if (uart_get_baudrate(port, &baud) != ESP_OK) return -EIO;
-
     uart_word_length_t wl;
-    if (uart_get_word_length(port, &wl) != ESP_OK) return -EIO;
-
     uart_parity_t par;
-    if (uart_get_parity(port, &par) != ESP_OK) return -EIO;
-
     uart_stop_bits_t sb;
-    if (uart_get_stop_bits(port, &sb) != ESP_OK) return -EIO;
-
     uart_hw_flowcontrol_t fc;
-    if (uart_get_hw_flow_ctrl(port, &fc) != ESP_OK) return -EIO;
+
+    if (uart_get_baudrate(port, &baud) != ESP_OK) {
+        return -EIO;
+    }
+    if (uart_get_word_length(port, &wl) != ESP_OK) {
+        return -EIO;
+    }
+    if (uart_get_parity(port, &par) != ESP_OK) {
+        return -EIO;
+    }
+    if (uart_get_stop_bits(port, &sb) != ESP_OK) {
+        return -EIO;
+    }
+    if (uart_get_hw_flow_ctrl(port, &fc) != ESP_OK) {
+        return -EIO;
+    }
 
     cfg->baudrate = baud;
 
     switch (wl) {
-    case UART_DATA_5_BITS: cfg->data_bits = UART_CFG_DATA_BITS_5; break;
-    case UART_DATA_6_BITS: cfg->data_bits = UART_CFG_DATA_BITS_6; break;
-    case UART_DATA_7_BITS: cfg->data_bits = UART_CFG_DATA_BITS_7; break;
-    case UART_DATA_8_BITS: cfg->data_bits = UART_CFG_DATA_BITS_8; break;
-    default: return -EIO;
+    case UART_DATA_5_BITS:
+        cfg->data_bits = UART_CFG_DATA_BITS_5;
+        break;
+    case UART_DATA_6_BITS:
+        cfg->data_bits = UART_CFG_DATA_BITS_6;
+        break;
+    case UART_DATA_7_BITS:
+        cfg->data_bits = UART_CFG_DATA_BITS_7;
+        break;
+    case UART_DATA_8_BITS:
+        cfg->data_bits = UART_CFG_DATA_BITS_8;
+        break;
+    default:
+        return -EIO;
     }
 
     switch (par) {
-    case UART_PARITY_DISABLE: cfg->parity = UART_CFG_PARITY_NONE; break;
-    case UART_PARITY_EVEN:    cfg->parity = UART_CFG_PARITY_EVEN; break;
-    case UART_PARITY_ODD:     cfg->parity = UART_CFG_PARITY_ODD;  break;
-    default: return -EIO;
+    case UART_PARITY_DISABLE:
+        cfg->parity = UART_CFG_PARITY_NONE;
+        break;
+    case UART_PARITY_EVEN:
+        cfg->parity = UART_CFG_PARITY_EVEN;
+        break;
+    case UART_PARITY_ODD:
+        cfg->parity = UART_CFG_PARITY_ODD;
+        break;
+    default:
+        return -EIO;
     }
 
     switch (sb) {
-    case UART_STOP_BITS_1:   cfg->stop_bits = UART_CFG_STOP_BITS_1;   break;
-    case UART_STOP_BITS_1_5: cfg->stop_bits = UART_CFG_STOP_BITS_1_5; break;
-    case UART_STOP_BITS_2:   cfg->stop_bits = UART_CFG_STOP_BITS_2;   break;
-    default: return -EIO;
+    case UART_STOP_BITS_1:
+        cfg->stop_bits = UART_CFG_STOP_BITS_1;
+        break;
+    case UART_STOP_BITS_1_5:
+        cfg->stop_bits = UART_CFG_STOP_BITS_1_5;
+        break;
+    case UART_STOP_BITS_2:
+        cfg->stop_bits = UART_CFG_STOP_BITS_2;
+        break;
+    default:
+        return -EIO;
     }
 
-    cfg->flow_ctrl = (fc == UART_HW_FLOWCTRL_CTS_RTS) ? UART_CFG_FLOW_CTRL_RTS_CTS
-                                                      : UART_CFG_FLOW_CTRL_NONE;
+    /* flow_ctrl: RS-485 isn't observable through uart_get_hw_flow_ctrl --
+     * IDF models it as a "mode" via uart_set_mode, orthogonal to the
+     * flow-control register. We track the configured value in
+     * d->current_flow_ctrl, updated by configure(). */
+    if (d->current_flow_ctrl == UART_CFG_FLOW_CTRL_RS485) {
+        cfg->flow_ctrl = UART_CFG_FLOW_CTRL_RS485;
+    } else if (fc == UART_HW_FLOWCTRL_CTS_RTS) {
+        cfg->flow_ctrl = UART_CFG_FLOW_CTRL_RTS_CTS;
+    } else {
+        cfg->flow_ctrl = UART_CFG_FLOW_CTRL_NONE;
+    }
     return 0;
 }
 
 static int uart_esp32_err_check(const struct device *dev)
 {
     struct uart_esp32_data *d = dev->data;
+    uint32_t flags;
+
     portENTER_CRITICAL(&d->lock);
-    uint32_t flags = d->err_flags;
+    flags = d->err_flags;
     d->err_flags = 0;
     portEXIT_CRITICAL(&d->lock);
     return (int)flags;
 }
 
 /* ----------------------------------------------------------------
- * Interrupt-driven API
+ * Event task + error latching (shared by IRQ and async paths)
  *
- * The event task runs in task context -- not ISR -- so the IRQ callback
- * is free to use blocking or non-ISR-safe APIs internally. It still
- * follows Zephyr's semantic contract: the callback inspects irq_rx_ready
- * / irq_tx_complete and drains/fills via fifo_read / fifo_fill.
+ * The event task runs in task context -- not ISR -- so registered
+ * callbacks are free to use blocking or non-ISR-safe APIs internally.
  * ---------------------------------------------------------------- */
 
-#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
-
-static void latch_err_event(struct uart_esp32_data *d, uart_event_type_t t)
-{
-    uint32_t set = 0;
-    switch (t) {
-    case UART_FIFO_OVF:    set |= UART_ERROR_OVERRUN; break;
-    case UART_BUFFER_FULL: set |= UART_ERROR_OVERRUN; break;
-    case UART_BREAK:       set |= UART_BREAK;         break;
-    case UART_PARITY_ERR:  set |= UART_ERROR_PARITY;  break;
-    case UART_FRAME_ERR:   set |= UART_ERROR_FRAMING; break;
-    default: return;
-    }
-    portENTER_CRITICAL(&d->lock);
-    d->err_flags |= set;
-    portEXIT_CRITICAL(&d->lock);
-}
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN) || defined(CONFIG_UART_ASYNC_API)
 
 #if defined(CONFIG_UART_ASYNC_API)
-static void async_dispatch_rx_data(const struct device *dev, size_t avail);
-static void async_signal_stop(const struct device *dev, uint32_t reason);
-
 static bool type_is_err(uart_event_type_t t)
 {
     switch (t) {
@@ -293,6 +394,37 @@ static bool type_is_err(uart_event_type_t t)
         return false;
     }
 }
+#endif
+
+static void latch_err_event(struct uart_esp32_data *d, uart_event_type_t t)
+{
+    uint32_t set = 0;
+
+    switch (t) {
+    case UART_FIFO_OVF:
+    case UART_BUFFER_FULL:
+        set = UART_ERROR_OVERRUN;
+        break;
+    case UART_BREAK:
+        set = UART_BREAK;
+        break;
+    case UART_PARITY_ERR:
+        set = UART_ERROR_PARITY;
+        break;
+    case UART_FRAME_ERR:
+        set = UART_ERROR_FRAMING;
+        break;
+    default:
+        return;
+    }
+    portENTER_CRITICAL(&d->lock);
+    d->err_flags |= set;
+    portEXIT_CRITICAL(&d->lock);
+}
+
+#if defined(CONFIG_UART_ASYNC_API)
+static void async_dispatch_rx_data(const struct device *dev, size_t avail);
+static void async_signal_stop(const struct device *dev, uint32_t reason);
 #endif
 
 static void uart_esp32_event_task(void *arg)
@@ -311,19 +443,41 @@ static void uart_esp32_event_task(void *arg)
 #if defined(CONFIG_UART_ASYNC_API)
         if (d->async_cb != NULL) {
             if (type_is_err(evt.type) && d->rx_enabled) {
-                async_signal_stop(dev, d->err_flags);
+                uint32_t reason;
+
+                /* Package + clear the latched flags under lock so the
+                 * same bits aren't also reported by a later err_check. */
+                portENTER_CRITICAL(&d->lock);
+                reason = d->err_flags;
+                d->err_flags = 0;
+                portEXIT_CRITICAL(&d->lock);
+                async_signal_stop(dev, reason);
             } else if (evt.type == UART_DATA && d->rx_enabled) {
                 async_dispatch_rx_data(dev, evt.size);
             }
             continue;
         }
 #endif
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
         if (d->irq_cb != NULL &&
             (d->irq_rx_enabled || d->irq_tx_enabled)) {
             d->irq_cb(dev, d->irq_user_data);
         }
+#endif
     }
 }
+
+#endif /* INTERRUPT_DRIVEN || ASYNC_API */
+
+/* ----------------------------------------------------------------
+ * Interrupt-driven API
+ *
+ * Follows Zephyr's semantic contract: the callback inspects
+ * irq_rx_ready / irq_tx_complete and drains/fills via fifo_read /
+ * fifo_fill.
+ * ---------------------------------------------------------------- */
+
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
 
 static void uart_esp32_irq_callback_set(const struct device *dev,
                                         uart_irq_callback_t cb,
@@ -337,16 +491,20 @@ static void uart_esp32_irq_callback_set(const struct device *dev,
 static void uart_esp32_irq_tx_enable(const struct device *dev)
 {
     struct uart_esp32_data *d = dev->data;
+
     d->irq_tx_enabled = true;
     /* Kick -- app callback is expected to fill as much as possible now.
      * Subsequent TX-ready signaling comes via the ring buffer, not the
      * event queue. See file-header TX-IRQ limitation note. */
-    if (d->irq_cb) d->irq_cb(dev, d->irq_user_data);
+    if (d->irq_cb != NULL) {
+        d->irq_cb(dev, d->irq_user_data);
+    }
 }
 
 static void uart_esp32_irq_tx_disable(const struct device *dev)
 {
     struct uart_esp32_data *d = dev->data;
+
     d->irq_tx_enabled = false;
 }
 
@@ -354,29 +512,38 @@ static int uart_esp32_irq_tx_ready(const struct device *dev)
 {
     const struct uart_esp32_config *cfg = dev->config;
     size_t free = 0;
+    esp_err_t err;
+
     /* With no TX ring, fall back to "always ready" and let fifo_fill
      * report actual bytes written. */
-    if (cfg->tx_buf_size == 0) return 1;
-    esp_err_t err = uart_get_tx_buffer_free_size(cfg->port, &free);
-    if (err != ESP_OK) return 0;
+    if (cfg->tx_buf_size == 0) {
+        return 1;
+    }
+    err = uart_get_tx_buffer_free_size(cfg->port, &free);
+    if (err != ESP_OK) {
+        return 0;
+    }
     return (free > 0) ? 1 : 0;
 }
 
 static int uart_esp32_irq_tx_complete(const struct device *dev)
 {
     const struct uart_esp32_config *cfg = dev->config;
+
     return (uart_wait_tx_done(cfg->port, 0) == ESP_OK) ? 1 : 0;
 }
 
 static void uart_esp32_irq_rx_enable(const struct device *dev)
 {
     struct uart_esp32_data *d = dev->data;
+
     d->irq_rx_enabled = true;
 }
 
 static void uart_esp32_irq_rx_disable(const struct device *dev)
 {
     struct uart_esp32_data *d = dev->data;
+
     d->irq_rx_enabled = false;
 }
 
@@ -384,7 +551,10 @@ static int uart_esp32_irq_rx_ready(const struct device *dev)
 {
     const struct uart_esp32_config *cfg = dev->config;
     size_t len = 0;
-    if (uart_get_buffered_data_len(cfg->port, &len) != ESP_OK) return 0;
+
+    if (uart_get_buffered_data_len(cfg->port, &len) != ESP_OK) {
+        return 0;
+    }
     return (len > 0) ? 1 : 0;
 }
 
@@ -393,14 +563,15 @@ static int uart_esp32_fifo_fill(const struct device *dev,
 {
     const struct uart_esp32_config *cfg = dev->config;
     int n;
+
     if (cfg->tx_buf_size == 0) {
-        /* Bypass ring -- HW FIFO only, immediate count */
+        /* Bypass ring -- HW FIFO only, immediate count. */
         n = uart_tx_chars(cfg->port, (const char *)buf, len);
     } else {
-        /* Ring-backed; returns bytes written, may be short if ring is full */
+        /* Ring-backed; may be short if the ring is full. */
         n = uart_write_bytes(cfg->port, buf, (size_t)len);
     }
-    return n < 0 ? 0 : n;
+    return (n < 0) ? 0 : n;
 }
 
 static int uart_esp32_fifo_read(const struct device *dev,
@@ -408,7 +579,8 @@ static int uart_esp32_fifo_read(const struct device *dev,
 {
     const struct uart_esp32_config *cfg = dev->config;
     int n = uart_read_bytes(cfg->port, buf, (size_t)len, 0);
-    return n < 0 ? 0 : n;
+
+    return (n < 0) ? 0 : n;
 }
 
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
@@ -435,33 +607,49 @@ static int uart_esp32_fifo_read(const struct device *dev,
 static void async_emit(const struct device *dev, struct uart_event *evt)
 {
     const struct uart_esp32_data *d = dev->data;
-    if (d->async_cb) d->async_cb(dev, evt, d->async_user_data);
+
+    if (d->async_cb != NULL) {
+        d->async_cb(dev, evt, d->async_user_data);
+    }
 }
 
 static void async_signal_stop(const struct device *dev, uint32_t reason)
 {
     struct uart_esp32_data *d = dev->data;
-    if (!d->rx_enabled) return;
-    struct uart_event evt = {
-        .type = UART_RX_STOPPED,
-        .data.rx_stop = {
-            .reason = reason,
-            .data   = d->rx_buf,
-            .len    = d->rx_buf_offset,
-        },
-    };
-    async_emit(dev, &evt);
-    /* Also release the buffer and report disabled so user reclaims it */
-    struct uart_event rel = {
-        .type = UART_RX_BUF_RELEASED,
-        .data.rx_buf.buf = d->rx_buf,
-    };
-    async_emit(dev, &rel);
+    uint8_t *buf;
+    size_t off;
+    struct uart_event evt;
+    struct uart_event dis;
+
+    if (!d->rx_enabled) {
+        return;
+    }
+
+    /* Snapshot state + tear down BEFORE emitting, so if the user's
+     * callback calls rx_disable/rx_enable reentrantly, our own emits
+     * won't double-fire and won't step on the user's new state. */
+    buf = d->rx_buf;
+    off = d->rx_buf_offset;
     d->rx_buf        = NULL;
     d->rx_buf_len    = 0;
     d->rx_buf_offset = 0;
     d->rx_enabled    = false;
-    struct uart_event dis = { .type = UART_RX_DISABLED };
+
+    evt = (struct uart_event){
+        .type = UART_RX_STOPPED,
+        .data.rx_stop = { .reason = reason, .data = buf, .len = off },
+    };
+    async_emit(dev, &evt);
+
+    if (buf != NULL) {
+        struct uart_event rel = {
+            .type = UART_RX_BUF_RELEASED,
+            .data.rx_buf.buf = buf,
+        };
+        async_emit(dev, &rel);
+    }
+
+    dis = (struct uart_event){ .type = UART_RX_DISABLED };
     async_emit(dev, &dis);
 }
 
@@ -473,12 +661,18 @@ static void async_dispatch_rx_data(const struct device *dev, size_t avail)
     while (avail > 0 && d->rx_enabled && d->rx_buf != NULL) {
         size_t room = d->rx_buf_len - d->rx_buf_offset;
         size_t want = (avail < room) ? avail : room;
-        int n = uart_read_bytes(cfg->port,
-                                d->rx_buf + d->rx_buf_offset,
-                                want, 0);
-        if (n <= 0) break;
+        uint8_t *old;
+        struct uart_event ev;
+        struct uart_event req;
+        int n;
 
-        struct uart_event ev = {
+        n = uart_read_bytes(cfg->port, d->rx_buf + d->rx_buf_offset,
+                            want, 0);
+        if (n <= 0) {
+            break;
+        }
+
+        ev = (struct uart_event){
             .type = UART_RX_RDY,
             .data.rx = {
                 .buf    = d->rx_buf,
@@ -491,40 +685,60 @@ static void async_dispatch_rx_data(const struct device *dev, size_t avail)
         d->rx_buf_offset += (size_t)n;
         avail -= (size_t)n;
 
-        if (d->rx_buf_offset < d->rx_buf_len) continue;
+        if (d->rx_buf_offset < d->rx_buf_len) {
+            continue;
+        }
 
-        /* Current buffer full: request next from user */
-        struct uart_event req = {
-            .type = UART_RX_BUF_REQUEST,
-        };
+        /* Current buffer full: snapshot it BEFORE emitting, so that if
+         * the user calls rx_disable inside the REQUEST callback we
+         * don't observe d->rx_buf == NULL and misreport. */
+        old = d->rx_buf;
+
+        req = (struct uart_event){ .type = UART_RX_BUF_REQUEST };
         async_emit(dev, &req);
 
-        /* User may have provided next buffer via rx_buf_rsp */
-        uint8_t *old     = d->rx_buf;
+        /* User's request callback may have:
+         *   a) called rx_buf_rsp     -> rx_buf_next is set, stay enabled
+         *   b) called rx_disable     -> rx_enabled is false, do nothing
+         *   c) done neither          -> release buffer + disable
+         */
+        if (!d->rx_enabled) {
+            /* User disabled mid-callback; rx_disable already emitted
+             * RELEASED+DISABLED for the old buffer. */
+            break;
+        }
+
         if (d->rx_buf_next != NULL) {
+            struct uart_event rel;
+
             d->rx_buf        = d->rx_buf_next;
             d->rx_buf_len    = d->rx_buf_next_len;
             d->rx_buf_offset = 0;
             d->rx_buf_next   = NULL;
             d->rx_buf_next_len = 0;
 
-            struct uart_event rel = {
+            rel = (struct uart_event){
                 .type = UART_RX_BUF_RELEASED,
                 .data.rx_buf.buf = old,
             };
             async_emit(dev, &rel);
         } else {
-            /* No next buffer -- release old, disable RX */
-            struct uart_event rel = {
-                .type = UART_RX_BUF_RELEASED,
-                .data.rx_buf.buf = old,
-            };
-            async_emit(dev, &rel);
+            struct uart_event rel;
+            struct uart_event dis;
+
+            /* No next buffer -- tear down BEFORE emit so reentrant
+             * rx_enable sees a clean slate. */
             d->rx_buf        = NULL;
             d->rx_buf_len    = 0;
             d->rx_buf_offset = 0;
             d->rx_enabled    = false;
-            struct uart_event dis = { .type = UART_RX_DISABLED };
+
+            rel = (struct uart_event){
+                .type = UART_RX_BUF_RELEASED,
+                .data.rx_buf.buf = old,
+            };
+            async_emit(dev, &rel);
+            dis = (struct uart_event){ .type = UART_RX_DISABLED };
             async_emit(dev, &dis);
             break;
         }
@@ -538,6 +752,10 @@ static void uart_esp32_tx_task(void *arg)
     struct uart_esp32_data *d = dev->data;
 
     for (;;) {
+        const uint8_t *buf;
+        size_t len;
+        struct uart_event evt;
+
         if (xSemaphoreTake(d->tx_start_sem, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -545,13 +763,13 @@ static void uart_esp32_tx_task(void *arg)
         uart_wait_tx_done(cfg->port, portMAX_DELAY);
         rs485_deassert_tx(cfg);
 
-        const uint8_t *buf = d->tx_buf;
-        size_t         len = d->tx_len;
+        buf = d->tx_buf;
+        len = d->tx_len;
         d->tx_buf       = NULL;
         d->tx_len       = 0;
         d->tx_in_flight = false;
 
-        struct uart_event evt = {
+        evt = (struct uart_event){
             .type = UART_TX_DONE,
             .data.tx = { .buf = buf, .len = len },
         };
@@ -571,12 +789,18 @@ static int uart_esp32_callback_set(const struct device *dev,
 static int uart_esp32_tx(const struct device *dev, const uint8_t *buf,
                          size_t len, int32_t timeout_us)
 {
-    (void)timeout_us; /* caller-specified timeout not honored yet */
     const struct uart_esp32_config *cfg = dev->config;
     struct uart_esp32_data *d = dev->data;
+    int n;
 
-    if (d->tx_in_flight) return -EBUSY;
-    if (d->tx_start_sem == NULL || d->tx_task == NULL) return -ENOSYS;
+    (void)timeout_us; /* caller-specified timeout not honored yet */
+
+    if (d->tx_in_flight) {
+        return -EBUSY;
+    }
+    if (d->tx_start_sem == NULL || d->tx_task == NULL) {
+        return -ENOSYS;
+    }
 
     d->tx_buf       = buf;
     d->tx_len       = len;
@@ -584,7 +808,7 @@ static int uart_esp32_tx(const struct device *dev, const uint8_t *buf,
 
     rs485_assert_tx(cfg);
 
-    int n = uart_write_bytes(cfg->port, buf, len);
+    n = uart_write_bytes(cfg->port, buf, len);
     if (n < 0) {
         rs485_deassert_tx(cfg);
         d->tx_in_flight = false;
@@ -592,7 +816,7 @@ static int uart_esp32_tx(const struct device *dev, const uint8_t *buf,
         d->tx_len       = 0;
         return -EIO;
     }
-    /* Kick the tx-done watcher */
+    /* Kick the tx-done watcher. */
     xSemaphoreGive(d->tx_start_sem);
     return 0;
 }
@@ -609,8 +833,16 @@ static int uart_esp32_rx_enable(const struct device *dev, uint8_t *buf,
 {
     struct uart_esp32_data *d = dev->data;
 
-    if (d->rx_enabled) return -EBUSY;
-    if (buf == NULL || len == 0) return -EINVAL;
+    /* IDF rx timeout is in baud-rate-tick units; skip translation for now --
+     * a future revision can convert timeout_us using the configured baud. */
+    (void)timeout_us;
+
+    if (d->rx_enabled) {
+        return -EBUSY;
+    }
+    if (buf == NULL || len == 0) {
+        return -EINVAL;
+    }
 
     d->rx_buf        = buf;
     d->rx_buf_len    = len;
@@ -619,10 +851,6 @@ static int uart_esp32_rx_enable(const struct device *dev, uint8_t *buf,
     d->rx_buf_next_len = 0;
     d->rx_enabled    = true;
 
-    /* IDF rx timeout is in baud-rate-tick units; skip translation for now --
-     * a future revision can convert timeout_us using the configured baud. */
-    (void)timeout_us;
-
     return 0;
 }
 
@@ -630,8 +858,13 @@ static int uart_esp32_rx_buf_rsp(const struct device *dev, uint8_t *buf,
                                  size_t len)
 {
     struct uart_esp32_data *d = dev->data;
-    if (!d->rx_enabled) return -EACCES;
-    if (d->rx_buf_next != NULL) return -EBUSY;
+
+    if (!d->rx_enabled) {
+        return -ENOSYS;  /* RX not active */
+    }
+    if (d->rx_buf_next != NULL) {
+        return -EBUSY;
+    }
     d->rx_buf_next     = buf;
     d->rx_buf_next_len = len;
     return 0;
@@ -640,13 +873,21 @@ static int uart_esp32_rx_buf_rsp(const struct device *dev, uint8_t *buf,
 static int uart_esp32_rx_disable(const struct device *dev)
 {
     struct uart_esp32_data *d = dev->data;
-    if (!d->rx_enabled) return -EFAULT;
+    uint8_t *old;
+    struct uart_event dis;
 
-    uint8_t *old = d->rx_buf;
+    if (!d->rx_enabled) {
+        return -EFAULT;  /* already disabled (Zephyr convention) */
+    }
+
+    /* Snapshot + tear down before emitting -- see async_signal_stop. */
+    old = d->rx_buf;
     d->rx_enabled    = false;
     d->rx_buf        = NULL;
     d->rx_buf_len    = 0;
     d->rx_buf_offset = 0;
+    d->rx_buf_next   = NULL;
+    d->rx_buf_next_len = 0;
 
     if (old != NULL) {
         struct uart_event rel = {
@@ -655,7 +896,7 @@ static int uart_esp32_rx_disable(const struct device *dev)
         };
         async_emit(dev, &rel);
     }
-    struct uart_event dis = { .type = UART_RX_DISABLED };
+    dis = (struct uart_event){ .type = UART_RX_DISABLED };
     async_emit(dev, &dis);
     return 0;
 }
@@ -666,7 +907,11 @@ static int uart_esp32_rx_disable(const struct device *dev)
  * Polling I/O
  *
  * poll_in is non-blocking: returns 0 on byte read, -1 when none available.
- * poll_out is blocking: writes one byte synchronously.
+ * poll_out hands the byte to the TX ring (or HW FIFO) and returns; it
+ * does NOT wait for the shift register to drain -- matching Zephyr's
+ * contract and avoiding a per-byte wait. Callers that need line-idle
+ * confirmation before doing something else (e.g., toggling a direction
+ * pin) should use the async API.
  * ---------------------------------------------------------------- */
 
 static int uart_esp32_poll_in(const struct device *dev, unsigned char *c)
@@ -680,7 +925,6 @@ static void uart_esp32_poll_out(const struct device *dev, unsigned char c)
 {
     const struct uart_esp32_config *cfg = dev->config;
     uart_write_bytes(cfg->port, &c, 1);
-    uart_wait_tx_done(cfg->port, portMAX_DELAY);
 }
 
 /* ----------------------------------------------------------------
@@ -691,21 +935,25 @@ esp_err_t uart_esp32_init(const struct device *dev)
 {
     const struct uart_esp32_config *cfg = dev->config;
     struct uart_esp32_data *d = dev->data;
+    const portMUX_TYPE init_lock = portMUX_INITIALIZER_UNLOCKED;
+    esp_err_t err;
 
-    portMUX_TYPE init_lock = portMUX_INITIALIZER_UNLOCKED;
     d->lock = init_lock;
     d->err_flags = 0;
+    d->current_flow_ctrl = cfg->default_cfg.flow_ctrl;
 
     if (!d->driver_installed) {
         QueueHandle_t *qp = NULL;
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN) || defined(CONFIG_UART_ASYNC_API)
-        if (cfg->evt_queue_size > 0) qp = &d->evt_queue;
+        if (cfg->evt_queue_size > 0) {
+            qp = &d->evt_queue;
+        }
 #endif
-        esp_err_t err = uart_driver_install(cfg->port,
-                                            (int)cfg->rx_buf_size,
-                                            (int)cfg->tx_buf_size,
-                                            cfg->evt_queue_size, qp,
-                                            cfg->intr_alloc_flags);
+        err = uart_driver_install(cfg->port,
+                                  (int)cfg->rx_buf_size,
+                                  (int)cfg->tx_buf_size,
+                                  cfg->evt_queue_size, qp,
+                                  cfg->intr_alloc_flags);
         if (err != ESP_OK) {
             LOG_ERR("uart_driver_install(port=%d) failed: %d",
                     cfg->port, err);
@@ -714,7 +962,7 @@ esp_err_t uart_esp32_init(const struct device *dev)
         d->driver_installed = true;
     }
 
-    esp_err_t err = apply_config(cfg->port, &cfg->default_cfg);
+    err = apply_config(cfg->port, &cfg->default_cfg);
     if (err != ESP_OK) {
         LOG_ERR("param_config failed: %d", err);
         return err;
@@ -727,10 +975,12 @@ esp_err_t uart_esp32_init(const struct device *dev)
         return err;
     }
 
-    err = rs485_init(cfg);
-    if (err != ESP_OK) {
-        LOG_ERR("rs485_init failed: %d", err);
-        return err;
+    if (cfg->default_cfg.flow_ctrl == UART_CFG_FLOW_CTRL_RS485) {
+        err = rs485_enable(cfg);
+        if (err != ESP_OK) {
+            LOG_ERR("rs485_enable failed: %d", err);
+            return err;
+        }
     }
 
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN) || defined(CONFIG_UART_ASYNC_API)
@@ -751,7 +1001,9 @@ esp_err_t uart_esp32_init(const struct device *dev)
 #if defined(CONFIG_UART_ASYNC_API)
     if (d->tx_start_sem == NULL) {
         d->tx_start_sem = xSemaphoreCreateBinary();
-        if (d->tx_start_sem == NULL) return ESP_ERR_NO_MEM;
+        if (d->tx_start_sem == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
     }
     if (d->tx_task == NULL) {
         BaseType_t ok = xTaskCreate(uart_esp32_tx_task,
