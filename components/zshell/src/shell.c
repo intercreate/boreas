@@ -293,10 +293,10 @@ int shell_init(struct shell *sh, const struct shell_transport *transport,
     /* Create shell thread */
     K_THREAD_STACK_DEFINE(shell_stack, CONFIG_ZSHELL_THREAD_STACK_SIZE);
 
+    sh->thread.name = "shell";
     k_thread_create(&sh->thread, shell_stack, CONFIG_ZSHELL_THREAD_STACK_SIZE,
                     shell_thread_entry, sh, NULL, NULL,
                     CONFIG_ZSHELL_THREAD_PRIORITY, 0, K_NO_WAIT);
-    k_thread_name_set(&sh->thread, "shell");
 
     LOG_INF("Shell initialized (%zu root commands)", _shell_root_cmd_count);
     return 0;
