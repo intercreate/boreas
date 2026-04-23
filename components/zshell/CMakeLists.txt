@@ -21,10 +21,10 @@ if(CONFIG_ZSHELL)
         list(APPEND srcs "src/shell_history.c")
     endif()
 
-    # UART backend -- only on real targets
+    # stdio transport backend -- only on real targets
     idf_build_get_property(target IDF_TARGET)
     if(NOT "${target}" STREQUAL "linux")
-        list(APPEND srcs "src/shell_uart.c")
+        list(APPEND srcs "src/shell_stdio.c")
     endif()
 
     # zsys-dependent builtins
@@ -39,11 +39,6 @@ if(CONFIG_ZSHELL)
 endif()
 
 set(requires zkernel freertos log zsys zdevice)
-
-idf_build_get_property(target IDF_TARGET)
-if(NOT "${target}" STREQUAL "linux")
-    list(APPEND requires driver)
-endif()
 
 idf_component_register(
     SRCS ${srcs}
