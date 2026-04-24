@@ -1,6 +1,6 @@
 # zshell
 
-Zephyr-style interactive shell with hierarchical commands, tab completion, command history, and VT100 terminal support. Runs over UART via ESP-IDF's VFS console layer.
+Zephyr-style interactive shell with hierarchical commands, tab completion, command history, and VT100 terminal support. Runs over ESP-IDF's VFS console layer (UART by default; USB-SERIAL-JTAG or USB-CDC when configured).
 
 The VFS layer also supports USB-SERIAL-JTAG (on chips that have the peripheral: ESP32-S3/C3/C5/C6/P4; not on classic ESP32 or S2). The shell transport is unchanged -- see "Console over USB-Serial-JTAG" below.
 
@@ -138,7 +138,7 @@ set(deps ...)
 if(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
     list(APPEND deps "esp_driver_usb_serial_jtag")
 endif()
-idf_component_register(SRCS "${srcs}" REQUIRES "${deps}" ...)
+idf_component_register(SRCS ${srcs} REQUIRES ${deps} ...)
 ```
 
 Why this lives in the app and not in boreas: USB-SERIAL-JTAG availability, header paths, and Kconfig symbol names have drifted across chipsets and IDF versions. Wrapping it in boreas would risk baking in a chip- or version-specific assumption. The transport (`shell_transport_stdio`) works unmodified in both cases -- it's the driver/VFS binding underneath that differs.
