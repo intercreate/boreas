@@ -835,17 +835,67 @@ static int uart_esp32_tx_abort(const struct device *dev)
 static int uart_esp32_rx_enable(const struct device *dev, uint8_t *buf,
                                 size_t len, int32_t timeout_us)
 {
+    const struct uart_esp32_config *cfg = dev->config;
     struct uart_esp32_data *d = dev->data;
-
-    /* IDF rx timeout is in baud-rate-tick units; skip translation for now --
-     * a future revision can convert timeout_us using the configured baud. */
-    (void)timeout_us;
+    uart_port_t port = cfg->port;
 
     if (d->rx_enabled) {
         return -EBUSY;
     }
     if (buf == NULL || len == 0) {
         return -EINVAL;
+    }
+
+    /* Translate Zephyr-style timeout_us into IDF's RX idle-timeout
+     * threshold (measured in UART symbol times).
+     *
+     *   timeout_us <= 0  -> pass 0 (disables the HW idle-timeout
+     *                        interrupt; UART_RX_RDY will then only fire
+     *                        on buffer-full or error).
+     *   timeout_us  > 0  -> ceil(timeout_us / one_symbol_us), clamped
+     *                        to [1, 126]. 126 is the max documented by
+     *                        IDF v5.x driver/uart.h for uart_set_rx_timeout
+     *                        across ESP32 variants.
+     *
+     * Symbol length is computed from the live UART config (not the
+     * default_cfg snapshot) so the threshold tracks runtime
+     * uart_configure() changes.
+     */
+    uint8_t tout_symbols = 0;
+    if (timeout_us > 0) {
+        uint32_t baud = 0;
+        uart_word_length_t wl;
+        uart_parity_t par;
+        uart_stop_bits_t sb;
+
+        if (uart_get_baudrate(port, &baud) != ESP_OK || baud == 0) {
+            return -EIO;
+        }
+        if (uart_get_word_length(port, &wl) != ESP_OK ||
+            uart_get_parity(port, &par) != ESP_OK ||
+            uart_get_stop_bits(port, &sb) != ESP_OK) {
+            return -EIO;
+        }
+
+        /* IDF UART_DATA_{5,6,7,8}_BITS enum is 0..3 -> +5 = actual bits. */
+        unsigned data_bits   = 5u + (unsigned)wl;
+        unsigned parity_bit  = (par == UART_PARITY_DISABLE) ? 0u : 1u;
+        unsigned stop_bits_n = (sb == UART_STOP_BITS_2) ? 2u : 1u;
+        unsigned symbol_bits = 1u + data_bits + parity_bit + stop_bits_n;
+
+        /* ceil(timeout_us * baud / (symbol_bits * 1e6)), 64-bit to keep
+         * headroom at multi-megabaud rates. */
+        uint64_t num  = (uint64_t)timeout_us * (uint64_t)baud;
+        uint64_t den  = (uint64_t)symbol_bits * 1000000u;
+        uint64_t syms = (num + den - 1) / den;
+
+        if (syms < 1)   syms = 1;
+        if (syms > 126) syms = 126;
+        tout_symbols = (uint8_t)syms;
+    }
+
+    if (uart_set_rx_timeout(port, tout_symbols) != ESP_OK) {
+        return -EIO;
     }
 
     d->rx_buf        = buf;

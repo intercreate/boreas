@@ -78,3 +78,37 @@ const struct device *device_get_by_index(size_t idx);
             _device_registry[_device_count++] = &_name;            \
         }                                                           \
     }
+
+/**
+ * Define and register a device instance with external (non-static) linkage.
+ *
+ * Same as DEVICE_DEFINE but omits `static` on the struct device, so other
+ * translation units can reference `&_name` directly as a constant
+ * initializer (e.g., for static arrays of device-backed structures).
+ *
+ * Mirrors Zephyr's linkage convention: Zephyr's DEVICE_DEFINE (non-DT)
+ * produces static linkage, while DEVICE_DT_DEFINE (backed by devicetree)
+ * produces external linkage so DEVICE_DT_GET() is valid across TUs. Use
+ * this macro when Boreas needs the equivalent of Zephyr's DT-backed
+ * behavior -- cross-TU access to a specific device symbol by name.
+ *
+ * The usual link-time caveat applies: the TU invoking this macro must be
+ * linked whole into the image (e.g., in `main/`) so the constructor fires.
+ */
+#define DEVICE_DEFINE_EXPORT(_name, _init, _api, _config, _data, _bus) \
+    static bool _name##_ready;                                          \
+    DRAM_ATTR const struct device _name = {                             \
+        .name   = #_name,                                               \
+        .bus    = (_bus),                                               \
+        .api    = (_api),                                               \
+        .config = (_config),                                           \
+        .data   = (_data),                                             \
+        .ready  = &_name##_ready,                                      \
+        .init   = (_init),                                             \
+    };                                                                  \
+    static void __attribute__((constructor))                            \
+    _device_register_##_name(void) {                                   \
+        if (_device_count < CONFIG_DEVICE_REGISTRY_MAX) {              \
+            _device_registry[_device_count++] = &_name;                \
+        }                                                               \
+    }
