@@ -25,10 +25,6 @@ typedef atomic_t atomic_val_t;
 
 #define ATOMIC_INIT(i) (i)
 
-#define ATOMIC_DEFINE(name, num_bits)                                          \
-    atomic_t name[((num_bits) + (sizeof(atomic_t) * 8) - 1) /                  \
-                  (sizeof(atomic_t) * 8)]
-
 static inline atomic_val_t atomic_get(const atomic_t *target)
 {
     return __atomic_load_n(target, __ATOMIC_SEQ_CST);
@@ -59,9 +55,10 @@ static inline atomic_val_t atomic_sub(atomic_t *target, atomic_val_t value)
     return __atomic_fetch_sub(target, value, __ATOMIC_SEQ_CST);
 }
 
-/* Bit-addressed helpers. `bit` is a 0-based index across the atomic_t word;
- * callers that pack multiple flags into one word are responsible for
- * staying within sizeof(atomic_t) * 8 bits.
+/* Bit-addressed helpers. These operate on a single atomic_t word;
+ * bit must be in [0, sizeof(atomic_t) * 8). Multi-word atomic bitmaps
+ * (ATOMIC_DEFINE in upstream Zephyr) are not supported -- add them only
+ * if a caller actually needs more than a word's worth of flags.
  */
 static inline bool atomic_test_bit(const atomic_t *target, int bit)
 {
