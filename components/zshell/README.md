@@ -1,8 +1,8 @@
 # zshell
 
-Zephyr-style interactive shell with hierarchical commands, tab completion, command history, and VT100 terminal support. Runs over UART via ESP-IDF's VFS console layer.
+Zephyr-style interactive shell with hierarchical commands, tab completion, command history, and VT100 terminal support. Runs over ESP-IDF's VFS console layer (UART by default; USB-SERIAL-JTAG or USB-CDC when configured).
 
-**Note:** USB-CDC is not currently tested and may have issues with the non-blocking stdin polling used by the UART transport. A dedicated USB-CDC transport backend may be needed.
+The VFS layer also supports USB-SERIAL-JTAG (on chips that have the peripheral: ESP32-S3/C3/C5/C6/P4; not on classic ESP32 or S2). The shell transport is unchanged -- see "Console over USB-Serial-JTAG" below.
 
 ## Quick start
 
@@ -12,7 +12,7 @@ Zephyr-style interactive shell with hierarchical commands, tab completion, comma
 static struct shell my_shell = { .name = "app" };
 
 void app_main(void) {
-    shell_init(&my_shell, &shell_transport_uart, "boreas> ");
+    shell_init(&my_shell, &shell_transport_stdio, "boreas> ");
 }
 ```
 
@@ -96,7 +96,7 @@ shell_write(sh, raw_data, len);
 
 ## Transport abstraction
 
-The shell is transport-agnostic. `shell_transport_uart` is the default (VFS stdio). Custom transports implement:
+The shell is transport-agnostic. `shell_transport_stdio` is the default (VFS stdio). Custom transports implement:
 
 ```c
 struct shell_transport_api {
@@ -106,6 +106,48 @@ struct shell_transport_api {
     int (*read)(const struct shell_transport *t, void *data, size_t len, size_t *cnt);
 };
 ```
+
+## Console over USB-Serial-JTAG
+
+ESP-IDF's built-in `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` makes stdout flow over the native USB peripheral, but the default VFS binding is **output-only** -- `fgetc(stdin)` returns `EOF` forever and the shell sees no keystrokes. You need to install the USB-SERIAL-JTAG RX driver and rebind VFS before `shell_init()`:
+
+```c
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#endif
+
+void app_main(void) {
+    /* ... other init ... */
+
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    usb_serial_jtag_driver_config_t usj_cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj_cfg));
+    ESP_ERROR_CHECK(usb_serial_jtag_vfs_register());
+    usb_serial_jtag_vfs_use_driver();
+#endif
+
+    shell_init(&my_shell, &shell_transport_stdio, NULL);
+}
+```
+
+And add `esp_driver_usb_serial_jtag` to your component's `REQUIRES` (gate on the same Kconfig so non-USJ builds don't pull it in):
+
+```cmake
+set(deps ...)
+if(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+    list(APPEND deps "esp_driver_usb_serial_jtag")
+endif()
+idf_component_register(SRCS ${srcs} REQUIRES ${deps} ...)
+```
+
+Why this lives in the app and not in boreas: USB-SERIAL-JTAG availability, header paths, and Kconfig symbol names have drifted across chipsets and IDF versions. Wrapping it in boreas would risk baking in a chip- or version-specific assumption. The transport (`shell_transport_stdio`) works unmodified in both cases -- it's the driver/VFS binding underneath that differs.
+
+Sanity checks if keys aren't reaching the shell:
+
+- Host connected before the driver install? The host enumerates lazily; a 100ms delay before install is sometimes needed on slow hosts.
+- Line endings: `usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR)` may be needed if your terminal sends `\r` only.
+- Confirm `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` is actually primary (menuconfig -> Component config -> ESP System Settings -> Channel for console output).
 
 ## Configuration
 
