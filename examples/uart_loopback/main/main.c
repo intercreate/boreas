@@ -11,6 +11,10 @@
  *   Phase 1 -- Polling: uart_poll_out() then uart_poll_in()
  *   Phase 2 -- Interrupt-driven: uart_fifo_fill / uart_fifo_read via IRQ cb
  *   Phase 3 -- Async: uart_tx / uart_rx_enable with UART_RX_RDY events
+ *   Phase 4 -- Async idle-timeout: short message into an oversized buffer,
+ *              asserting UART_RX_RDY fires on HW RX idle-timeout rather
+ *              than buffer-full. Validates uart_rx_enable(timeout_us) is
+ *              wired to IDF's uart_set_rx_timeout.
  *
  * To switch to a real wire, remove the uart_set_loop_back() call below
  * and tie UART1 TX->RX externally. TX_PIN / RX_PIN are routable to any
@@ -218,6 +222,101 @@ static bool phase_async(void)
 }
 
 /* -------------------------------------------------------------------
+ * Phase 4 -- async idle-timeout
+ *
+ * Send a short message into a buffer much larger than the message,
+ * with a nonzero RX idle-timeout. The only way UART_RX_RDY can fire
+ * here is via the HW idle-timeout interrupt (the buffer never fills).
+ *
+ * Before the uart_rx_enable(timeout_us) -> uart_set_rx_timeout wiring,
+ * this phase times out with no event. After the wiring, it returns
+ * within ~one timeout period of the last transmitted byte.
+ * ---------------------------------------------------------------- */
+
+#define PHASE4_TIMEOUT_US   5000   /* 5 ms of idle after last byte */
+#define PHASE4_WAIT_MS      200    /* generous window for event to fire */
+
+static const char   idle_tx[] = "IDLE";
+static uint8_t      idle_rx_buf[64];       /* much larger than message */
+static volatile size_t idle_rx_total;
+static volatile bool   idle_rx_ready_seen;
+static struct k_sem idle_rx_event;
+static struct k_sem idle_tx_done;
+
+static void idle_cb(const struct device *dev, struct uart_event *evt,
+                    void *user_data)
+{
+    (void)dev;
+    (void)user_data;
+
+    switch (evt->type) {
+    case UART_TX_DONE:
+        k_sem_give(&idle_tx_done);
+        break;
+    case UART_RX_RDY:
+        idle_rx_total += evt->data.rx.len;
+        idle_rx_ready_seen = true;
+        k_sem_give(&idle_rx_event);
+        break;
+    case UART_RX_BUF_REQUEST:
+    case UART_RX_BUF_RELEASED:
+    case UART_RX_DISABLED:
+        /* Not expected to drive the test; buffer is oversized so we
+         * should see RX_RDY from the idle-timeout before any of these. */
+        break;
+    case UART_RX_STOPPED:
+        LOG_WRN("phase4 rx stopped, reason=0x%x",
+                (unsigned)evt->data.rx_stop.reason);
+        break;
+    case UART_TX_ABORTED:
+        k_sem_give(&idle_tx_done);
+        break;
+    }
+}
+
+static bool phase_idle_timeout(void)
+{
+    idle_rx_total = 0;
+    idle_rx_ready_seen = false;
+    memset(idle_rx_buf, 0, sizeof(idle_rx_buf));
+    k_sem_init(&idle_rx_event, 0, 1);
+    k_sem_init(&idle_tx_done, 0, 1);
+
+    uart_callback_set(&uart1, idle_cb, NULL);
+
+    /* Oversized buffer + nonzero timeout -- RX_RDY can only come from
+     * the HW idle-timeout interrupt. */
+    if (uart_rx_enable(&uart1, idle_rx_buf, sizeof(idle_rx_buf),
+                       PHASE4_TIMEOUT_US) != 0) {
+        LOG_ERR("rx_enable failed");
+        return false;
+    }
+
+    const size_t expect = sizeof(idle_tx) - 1;
+    if (uart_tx(&uart1, (const uint8_t *)idle_tx, expect, 0) != 0) {
+        LOG_ERR("tx kick failed");
+        (void)uart_rx_disable(&uart1);
+        return false;
+    }
+
+    int rc_tx = k_sem_take(&idle_tx_done, K_MSEC(PHASE4_WAIT_MS));
+    int rc_rx = k_sem_take(&idle_rx_event, K_MSEC(PHASE4_WAIT_MS));
+
+    (void)uart_rx_disable(&uart1);
+
+    LOG_INF("phase4 idle-timeout rx='%.*s' total=%u "
+            "(tx_rc=%d rx_rc=%d ready_seen=%d)",
+            (int)idle_rx_total, (char *)idle_rx_buf,
+            (unsigned)idle_rx_total, rc_tx, rc_rx,
+            (int)idle_rx_ready_seen);
+
+    return rc_tx == 0 && rc_rx == 0 &&
+           idle_rx_ready_seen &&
+           idle_rx_total == expect &&
+           memcmp(idle_tx, idle_rx_buf, expect) == 0;
+}
+
+/* -------------------------------------------------------------------
  * Main
  * ---------------------------------------------------------------- */
 
@@ -242,11 +341,12 @@ void app_main(void)
     k_msleep(5);
     uart_flush_input(UART_NUM_1);
 
-    int pass = 0, total = 3;
+    int pass = 0, total = 4;
 
-    pass += phase_polling() ? 1 : 0;
-    pass += phase_irq()     ? 1 : 0;
-    pass += phase_async()   ? 1 : 0;
+    pass += phase_polling()       ? 1 : 0;
+    pass += phase_irq()           ? 1 : 0;
+    pass += phase_async()         ? 1 : 0;
+    pass += phase_idle_timeout()  ? 1 : 0;
 
     LOG_INF("=== Result: %d/%d PASS ===", pass, total);
 
