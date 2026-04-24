@@ -7,7 +7,8 @@
  * Reads and writes go through stdin/stdout, so the actual hardware this
  * rides is whatever ESP-IDF's VFS console layer is bound to -- UART by
  * default, or USB-SERIAL-JTAG / USB-CDC when CONFIG_ESP_CONSOLE_* selects
- * them. No UART-specific calls here; the name is historical.
+ * them. The transport was historically called `uart`; this backend now
+ * reflects its stdio/VFS nature and makes no UART-specific calls.
  *
  * Zephyr reference: subsys/shell/backends/shell_uart.c
  */
