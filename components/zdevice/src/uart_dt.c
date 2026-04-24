@@ -877,16 +877,21 @@ static int uart_esp32_rx_enable(const struct device *dev, uint8_t *buf,
             return -EIO;
         }
 
-        /* IDF UART_DATA_{5,6,7,8}_BITS enum is 0..3 -> +5 = actual bits. */
-        unsigned data_bits   = 5u + (unsigned)wl;
-        unsigned parity_bit  = (par == UART_PARITY_DISABLE) ? 0u : 1u;
-        unsigned stop_bits_n = (sb == UART_STOP_BITS_2) ? 2u : 1u;
-        unsigned symbol_bits = 1u + data_bits + parity_bit + stop_bits_n;
+        /* IDF UART_DATA_{5,6,7,8}_BITS enum is 0..3 -> +5 = actual bits.
+         * Frame length is tracked in half-bit units so UART_STOP_BITS_1_5
+         * is represented exactly. */
+        unsigned data_bits      = 5u + (unsigned)wl;
+        unsigned parity_bit     = (par == UART_PARITY_DISABLE) ? 0u : 1u;
+        unsigned stop_bits_x2   = (sb == UART_STOP_BITS_2)   ? 4u :
+                                  (sb == UART_STOP_BITS_1_5) ? 3u : 2u;
+        unsigned symbol_bits_x2 = (1u + data_bits + parity_bit) * 2u
+                                  + stop_bits_x2;
 
-        /* ceil(timeout_us * baud / (symbol_bits * 1e6)), 64-bit to keep
-         * headroom at multi-megabaud rates. */
-        uint64_t num  = (uint64_t)timeout_us * (uint64_t)baud;
-        uint64_t den  = (uint64_t)symbol_bits * 1000000u;
+        /* ceil(timeout_us * baud / ((symbol_bits_x2 / 2) * 1e6)), expressed
+         * as ceil(timeout_us * baud * 2 / (symbol_bits_x2 * 1e6)) to keep
+         * the computation integral. 64-bit for headroom at multi-megabaud. */
+        uint64_t num  = (uint64_t)timeout_us * (uint64_t)baud * 2u;
+        uint64_t den  = (uint64_t)symbol_bits_x2 * 1000000u;
         uint64_t syms = (num + den - 1) / den;
 
         if (syms < 1)   syms = 1;
