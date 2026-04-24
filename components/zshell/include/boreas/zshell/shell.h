@@ -243,10 +243,13 @@ void shell_vt100_process(struct shell *sh, char ch);
 void shell_completion(struct shell *sh);
 
 /* ----------------------------------------------------------------
- * UART Transport (provided by shell_uart.c)
+ * stdio transport (provided by shell_stdio.c)
+ *
+ * Rides ESP-IDF's VFS console layer, so it works over whatever
+ * CONFIG_ESP_CONSOLE_* selects -- UART, USB-SERIAL-JTAG, USB-CDC.
  * ---------------------------------------------------------------- */
 
-extern const struct shell_transport shell_transport_uart;
+extern const struct shell_transport shell_transport_stdio;
 
 #ifdef __cplusplus
 }

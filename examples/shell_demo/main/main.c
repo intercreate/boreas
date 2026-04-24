@@ -51,8 +51,9 @@ void app_main(void)
 {
     LOG_INF("=== Boreas Shell Demo ===");
 
-    /* Start the shell on UART */
-    shell_init(&demo_shell, &shell_transport_uart, "boreas> ");
+    /* Start the shell on the VFS console (UART by default, USB-Serial-JTAG
+     * or USB-CDC if CONFIG_ESP_CONSOLE_* selects them). */
+    shell_init(&demo_shell, &shell_transport_stdio, "boreas> ");
 
     /* Main task can do other work or just idle */
     LOG_INF("Shell started. Type 'help' for available commands.");
