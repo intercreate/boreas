@@ -56,16 +56,15 @@ extern "C" {
 #endif
 
 #ifndef CONTAINER_OF
-#define CONTAINER_OF(ptr, type, field) \
-    ((type *)(((char *)(ptr)) - offsetof(type, field)))
+#define CONTAINER_OF(ptr, type, field) ((type *)(((char *)(ptr)) - offsetof(type, field)))
 #endif
 
 #ifndef IS_ENABLED
-#define IS_ENABLED(config_macro) _IS_ENABLED1(config_macro)
-#define _IS_ENABLED1(config_macro) _IS_ENABLED2(_XXXX##config_macro)
-#define _IS_ENABLED2(one_or_two_args) _IS_ENABLED3(one_or_two_args true, false)
+#define IS_ENABLED(config_macro)       _IS_ENABLED1(config_macro)
+#define _IS_ENABLED1(config_macro)     _IS_ENABLED2(_XXXX##config_macro)
+#define _IS_ENABLED2(one_or_two_args)  _IS_ENABLED3(one_or_two_args true, false)
 #define _IS_ENABLED3(ignore, val, ...) val
-#define _XXXX1 _YYYY,
+#define _XXXX1                         _YYYY,
 #endif
 
 #ifndef POPCOUNT
@@ -105,13 +104,13 @@ extern "C" {
 /* Runtime assertion -- logs and aborts */
 #ifndef __ASSERT
 #include "esp_log.h"
-#define __ASSERT(cond, msg) \
-    do { \
-        if (!(cond)) { \
-            ESP_LOGE("ASSERT", "%s at %s:%d", (msg), __FILE__, __LINE__); \
-            abort(); \
-        } \
-    } while (0)
+#define __ASSERT(cond, msg)                                                                        \
+	do {                                                                                       \
+		if (!(cond)) {                                                                     \
+			ESP_LOGE("ASSERT", "%s at %s:%d", (msg), __FILE__, __LINE__);              \
+			abort();                                                                   \
+		}                                                                                  \
+	} while (0)
 #endif
 
 #ifdef __cplusplus

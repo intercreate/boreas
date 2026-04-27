@@ -27,32 +27,32 @@ typedef atomic_t atomic_val_t;
 
 static inline atomic_val_t atomic_get(const atomic_t *target)
 {
-    return __atomic_load_n(target, __ATOMIC_SEQ_CST);
+	return __atomic_load_n(target, __ATOMIC_SEQ_CST);
 }
 
 static inline void atomic_set(atomic_t *target, atomic_val_t value)
 {
-    __atomic_store_n(target, value, __ATOMIC_SEQ_CST);
+	__atomic_store_n(target, value, __ATOMIC_SEQ_CST);
 }
 
 static inline atomic_val_t atomic_or(atomic_t *target, atomic_val_t value)
 {
-    return __atomic_fetch_or(target, value, __ATOMIC_SEQ_CST);
+	return __atomic_fetch_or(target, value, __ATOMIC_SEQ_CST);
 }
 
 static inline atomic_val_t atomic_and(atomic_t *target, atomic_val_t value)
 {
-    return __atomic_fetch_and(target, value, __ATOMIC_SEQ_CST);
+	return __atomic_fetch_and(target, value, __ATOMIC_SEQ_CST);
 }
 
 static inline atomic_val_t atomic_add(atomic_t *target, atomic_val_t value)
 {
-    return __atomic_fetch_add(target, value, __ATOMIC_SEQ_CST);
+	return __atomic_fetch_add(target, value, __ATOMIC_SEQ_CST);
 }
 
 static inline atomic_val_t atomic_sub(atomic_t *target, atomic_val_t value)
 {
-    return __atomic_fetch_sub(target, value, __ATOMIC_SEQ_CST);
+	return __atomic_fetch_sub(target, value, __ATOMIC_SEQ_CST);
 }
 
 /* Bit-addressed helpers. These operate on a single atomic_t word;
@@ -69,29 +69,29 @@ static inline atomic_val_t atomic_sub(atomic_t *target, atomic_val_t value)
 
 static inline bool atomic_test_bit(const atomic_t *target, int bit)
 {
-    return (atomic_get(target) & _ATOMIC_BIT_MASK(bit)) != 0;
+	return (atomic_get(target) & _ATOMIC_BIT_MASK(bit)) != 0;
 }
 
 static inline void atomic_set_bit(atomic_t *target, int bit)
 {
-    (void)atomic_or(target, _ATOMIC_BIT_MASK(bit));
+	(void)atomic_or(target, _ATOMIC_BIT_MASK(bit));
 }
 
 static inline void atomic_clear_bit(atomic_t *target, int bit)
 {
-    (void)atomic_and(target, ~_ATOMIC_BIT_MASK(bit));
+	(void)atomic_and(target, ~_ATOMIC_BIT_MASK(bit));
 }
 
 static inline bool atomic_test_and_set_bit(atomic_t *target, int bit)
 {
-    atomic_val_t mask = _ATOMIC_BIT_MASK(bit);
-    return (atomic_or(target, mask) & mask) != 0;
+	atomic_val_t mask = _ATOMIC_BIT_MASK(bit);
+	return (atomic_or(target, mask) & mask) != 0;
 }
 
 static inline bool atomic_test_and_clear_bit(atomic_t *target, int bit)
 {
-    atomic_val_t mask = _ATOMIC_BIT_MASK(bit);
-    return (atomic_and(target, ~mask) & mask) != 0;
+	atomic_val_t mask = _ATOMIC_BIT_MASK(bit);
+	return (atomic_and(target, ~mask) & mask) != 0;
 }
 
 #ifdef __cplusplus
