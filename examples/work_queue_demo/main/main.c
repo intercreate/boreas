@@ -28,13 +28,13 @@ static int heartbeat_count = 0;
 
 static void heartbeat_expiry(struct k_timer *timer)
 {
-    heartbeat_count++;
-    LOG_INF("[Timer] Heartbeat #%d", heartbeat_count);
+	heartbeat_count++;
+	LOG_INF("[Timer] Heartbeat #%d", heartbeat_count);
 }
 
 static void heartbeat_stop(struct k_timer *timer)
 {
-    LOG_INF("[Timer] Heartbeat stopped after %d beats", heartbeat_count);
+	LOG_INF("[Timer] Heartbeat stopped after %d beats", heartbeat_count);
 }
 
 static struct k_timer heartbeat_timer;
@@ -44,16 +44,15 @@ static struct k_timer heartbeat_timer;
  * ---------------------------------------------------------------- */
 
 struct sensor_work_ctx {
-    struct k_work work;
-    int sensor_id;
-    int reading;
+	struct k_work work;
+	int sensor_id;
+	int reading;
 };
 
 static void sensor_work_handler(struct k_work *work)
 {
-    struct sensor_work_ctx *ctx = CONTAINER_OF(work, struct sensor_work_ctx, work);
-    LOG_INF("[Work] Processing sensor %d, reading=%d",
-             ctx->sensor_id, ctx->reading);
+	struct sensor_work_ctx *ctx = CONTAINER_OF(work, struct sensor_work_ctx, work);
+	LOG_INF("[Work] Processing sensor %d, reading=%d", ctx->sensor_id, ctx->reading);
 }
 
 static struct sensor_work_ctx sensor_ctx;
@@ -64,7 +63,7 @@ static struct sensor_work_ctx sensor_ctx;
 
 static void delayed_handler(struct k_work *work)
 {
-    LOG_INF("[Delayed] This ran 2 seconds after scheduling");
+	LOG_INF("[Delayed] This ran 2 seconds after scheduling");
 }
 
 static struct k_work_delayable delayed_work;
@@ -77,9 +76,8 @@ static int reschedule_count = 0;
 
 static void reschedule_handler(struct k_work *work)
 {
-    reschedule_count++;
-    LOG_INF("[Reschedule] Finally fired after %d reschedules",
-             reschedule_count);
+	reschedule_count++;
+	LOG_INF("[Reschedule] Finally fired after %d reschedules", reschedule_count);
 }
 
 static struct k_work_delayable reschedule_work;
@@ -90,47 +88,46 @@ static struct k_work_delayable reschedule_work;
 
 void app_main(void)
 {
-    LOG_INF("=== Boreas Work Queue Demo ===");
+	LOG_INF("=== Boreas Work Queue Demo ===");
 
-    /* Start the system work queue (required before submitting work) */
-    k_work_queue_init(&k_sys_work_q);
-    k_work_queue_start(&k_sys_work_q, "sys_wq", 4096, 5);
+	/* Start the system work queue (required before submitting work) */
+	k_work_queue_init(&k_sys_work_q);
+	k_work_queue_start(&k_sys_work_q, "sys_wq", 4096, 5);
 
-    /* --- Example 1: Periodic timer --- */
-    LOG_INF("Starting heartbeat timer (every 1s, runs for 5s)...");
-    k_timer_init(&heartbeat_timer, heartbeat_expiry, heartbeat_stop);
-    k_timer_start(&heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
+	/* --- Example 1: Periodic timer --- */
+	LOG_INF("Starting heartbeat timer (every 1s, runs for 5s)...");
+	k_timer_init(&heartbeat_timer, heartbeat_expiry, heartbeat_stop);
+	k_timer_start(&heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
 
-    /* --- Example 2: Immediate work with context --- */
-    LOG_INF("Submitting sensor work...");
-    sensor_ctx.sensor_id = 7;
-    sensor_ctx.reading = 2350;
-    k_work_init(&sensor_ctx.work, sensor_work_handler);
-    k_work_submit(&sensor_ctx.work);
+	/* --- Example 2: Immediate work with context --- */
+	LOG_INF("Submitting sensor work...");
+	sensor_ctx.sensor_id = 7;
+	sensor_ctx.reading = 2350;
+	k_work_init(&sensor_ctx.work, sensor_work_handler);
+	k_work_submit(&sensor_ctx.work);
 
-    /* --- Example 3: Delayed work --- */
-    LOG_INF("Scheduling delayed work (fires in 2s)...");
-    k_work_init_delayable(&delayed_work, delayed_handler);
-    k_work_schedule(&delayed_work, K_SECONDS(2));
+	/* --- Example 3: Delayed work --- */
+	LOG_INF("Scheduling delayed work (fires in 2s)...");
+	k_work_init_delayable(&delayed_work, delayed_handler);
+	k_work_schedule(&delayed_work, K_SECONDS(2));
 
-    /* --- Example 4: Reschedulable work --- */
-    LOG_INF("Scheduling work for 5s, then rescheduling to 3s...");
-    k_work_init_delayable(&reschedule_work, reschedule_handler);
-    k_work_schedule(&reschedule_work, K_SECONDS(5));
-    k_msleep(500);
-    /* Oops, changed our mind -- fire sooner */
-    k_work_reschedule(&reschedule_work, K_SECONDS(3));
-    LOG_INF("Rescheduled to 3s from now (3.5s total)");
+	/* --- Example 4: Reschedulable work --- */
+	LOG_INF("Scheduling work for 5s, then rescheduling to 3s...");
+	k_work_init_delayable(&reschedule_work, reschedule_handler);
+	k_work_schedule(&reschedule_work, K_SECONDS(5));
+	k_msleep(500);
+	/* Oops, changed our mind -- fire sooner */
+	k_work_reschedule(&reschedule_work, K_SECONDS(3));
+	LOG_INF("Rescheduled to 3s from now (3.5s total)");
 
-    /* Let everything run */
-    k_msleep(5500);
+	/* Let everything run */
+	k_msleep(5500);
 
-    /* Stop the heartbeat */
-    k_timer_stop(&heartbeat_timer);
+	/* Stop the heartbeat */
+	k_timer_stop(&heartbeat_timer);
 
-    /* Show timer status */
-    LOG_INF("Timer remaining: %lld ms",
-             (long long)k_timer_remaining_get(&heartbeat_timer));
+	/* Show timer status */
+	LOG_INF("Timer remaining: %lld ms", (long long)k_timer_remaining_get(&heartbeat_timer));
 
-    LOG_INF("=== Demo complete ===");
+	LOG_INF("=== Demo complete ===");
 }

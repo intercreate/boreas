@@ -40,54 +40,54 @@ void test_k_event_mt_group(void);
 
 void app_main(void)
 {
-    UNITY_BEGIN();
+	UNITY_BEGIN();
 
-    /* Layer 0: Foundation */
-    test_timeout_group();
-    test_slist_group();
-    test_dlist_group();
-    test_byteorder_group();
+	/* Layer 0: Foundation */
+	test_timeout_group();
+	test_slist_group();
+	test_dlist_group();
+	test_byteorder_group();
 
-    /* Layer 1: Kernel primitives */
-    test_k_sem_group();
-    test_k_mutex_group();
-    test_k_msgq_group();
-    test_k_event_group();
+	/* Layer 1: Kernel primitives */
+	test_k_sem_group();
+	test_k_mutex_group();
+	test_k_msgq_group();
+	test_k_event_group();
 
-    /* System services */
-    test_retry_group();
-    test_log_group();
+	/* System services */
+	test_retry_group();
+	test_log_group();
 
-    /* Device model */
-    test_device_registry_group();
+	/* Device model */
+	test_device_registry_group();
 
 #if defined(CONFIG_ZSHELL)
-    /* Shell */
-    test_shell_group();
+	/* Shell */
+	test_shell_group();
 #endif
 
 #if !CONFIG_IDF_TARGET_LINUX
-    /* Layer 0: Uptime & Sleep (need esp_timer) */
-    test_uptime_group();
-    test_sleep_group();
+	/* Layer 0: Uptime & Sleep (need esp_timer) */
+	test_uptime_group();
+	test_sleep_group();
 
-    /* Layer 1: Thread */
-    test_k_thread_group();
+	/* Layer 1: Thread */
+	test_k_thread_group();
 
-    /* Mutex priority inheritance (needs real scheduling) */
-    test_k_mutex_pi_group();
+	/* Mutex priority inheritance (needs real scheduling) */
+	test_k_mutex_pi_group();
 
-    /* Multi-thread event tests */
-    test_k_event_mt_group();
+	/* Multi-thread event tests */
+	test_k_event_mt_group();
 
-    /* Layer 2: Timer & Work Queue */
-    test_k_timer_group();
-    test_k_work_group();
+	/* Layer 2: Timer & Work Queue */
+	test_k_timer_group();
+	test_k_work_group();
 #endif
 
 #if CONFIG_IDF_TARGET_LINUX
-    exit(UNITY_END());
+	exit(UNITY_END());
 #else
-    UNITY_END();
+	UNITY_END();
 #endif
 }
