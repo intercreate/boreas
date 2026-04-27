@@ -27,45 +27,43 @@ extern "C" {
 #endif
 
 enum retry_strategy {
-    RETRY_FIXED,          /* constant delay */
-    RETRY_EXPONENTIAL,    /* base * 2^attempt, capped at max */
-    RETRY_EXP_JITTER,     /* exponential + random jitter (0-25%) */
+	RETRY_FIXED,       /* constant delay */
+	RETRY_EXPONENTIAL, /* base * 2^attempt, capped at max */
+	RETRY_EXP_JITTER,  /* exponential + random jitter (0-25%) */
 };
 
 struct retry_ctx {
-    uint8_t  attempt;
-    uint8_t  max_attempts;
-    uint32_t base_delay_ms;
-    uint32_t max_delay_ms;
-    enum retry_strategy strategy;
+	uint8_t attempt;
+	uint8_t max_attempts;
+	uint32_t base_delay_ms;
+	uint32_t max_delay_ms;
+	enum retry_strategy strategy;
 };
 
-static inline void retry_ctx_init(struct retry_ctx *ctx,
-                                  uint8_t max_attempts,
-                                  uint32_t base_delay_ms,
-                                  uint32_t max_delay_ms,
-                                  enum retry_strategy strategy)
+static inline void retry_ctx_init(struct retry_ctx *ctx, uint8_t max_attempts,
+				  uint32_t base_delay_ms, uint32_t max_delay_ms,
+				  enum retry_strategy strategy)
 {
-    ctx->attempt = 0;
-    ctx->max_attempts = max_attempts;
-    ctx->base_delay_ms = base_delay_ms;
-    ctx->max_delay_ms = max_delay_ms;
-    ctx->strategy = strategy;
+	ctx->attempt = 0;
+	ctx->max_attempts = max_attempts;
+	ctx->base_delay_ms = base_delay_ms;
+	ctx->max_delay_ms = max_delay_ms;
+	ctx->strategy = strategy;
 }
 
 static inline void retry_reset(struct retry_ctx *ctx)
 {
-    ctx->attempt = 0;
+	ctx->attempt = 0;
 }
 
 static inline bool retry_exhausted(const struct retry_ctx *ctx)
 {
-    return ctx->attempt >= ctx->max_attempts;
+	return ctx->attempt >= ctx->max_attempts;
 }
 
 static inline uint8_t retry_attempt_get(const struct retry_ctx *ctx)
 {
-    return ctx->attempt;
+	return ctx->attempt;
 }
 
 /**

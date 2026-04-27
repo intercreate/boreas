@@ -46,12 +46,12 @@ extern "C" {
 #define ZSYS_LOG_THREAD_NAME_MAX 16
 
 struct log_msg {
-    int64_t  timestamp_ms;                        /*  8 bytes -- k_uptime_get() */
-    uint8_t  level;                               /*  1 byte  */
-    uint8_t  _reserved;                           /*  1 byte  */
-    char     module[ZSYS_LOG_MODULE_NAME_MAX];    /* 16 bytes */
-    char     thread[ZSYS_LOG_THREAD_NAME_MAX];    /* 16 bytes */
-    char     text[CONFIG_ZSYS_LOG_MSG_MAX_LEN];   /* 80 bytes (default) */
+	int64_t timestamp_ms;                   /*  8 bytes -- k_uptime_get() */
+	uint8_t level;                          /*  1 byte  */
+	uint8_t _reserved;                      /*  1 byte  */
+	char module[ZSYS_LOG_MODULE_NAME_MAX];  /* 16 bytes */
+	char thread[ZSYS_LOG_THREAD_NAME_MAX];  /* 16 bytes */
+	char text[CONFIG_ZSYS_LOG_MSG_MAX_LEN]; /* 80 bytes (default) */
 };
 /* Total ~122 bytes with defaults, naturally aligned by int64_t */
 
@@ -62,20 +62,19 @@ struct log_msg {
 struct log_backend;
 
 typedef void (*log_backend_init_fn)(const struct log_backend *backend);
-typedef void (*log_backend_put_fn)(const struct log_backend *backend,
-                                   const struct log_msg *msg);
+typedef void (*log_backend_put_fn)(const struct log_backend *backend, const struct log_msg *msg);
 typedef void (*log_backend_panic_fn)(const struct log_backend *backend);
 
 struct log_backend_api {
-    log_backend_init_fn  init;   /* called once at log subsystem init (may be NULL) */
-    log_backend_put_fn   put;    /* called for each message */
-    log_backend_panic_fn panic;  /* called on panic mode switch (may be NULL) */
+	log_backend_init_fn init;   /* called once at log subsystem init (may be NULL) */
+	log_backend_put_fn put;     /* called for each message */
+	log_backend_panic_fn panic; /* called on panic mode switch (may be NULL) */
 };
 
 struct log_backend {
-    const struct log_backend_api *api;
-    const char                   *name;
-    void                         *ctx;   /* backend-private context */
+	const struct log_backend_api *api;
+	const char *name;
+	void *ctx; /* backend-private context */
 };
 
 /* --------------------------------------------------------------------------
@@ -101,26 +100,24 @@ void zsys_log_backend_register(const struct log_backend *backend);
 #if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O fallback: host unit-test executable is whole-linked, so the legacy
  * constructor path is safe. See LOG_MODULE_REGISTER for the rationale. */
-#define LOG_BACKEND_DEFINE(_name, _api, _ctx)                                \
-    static const struct log_backend _log_backend_##_name = {                 \
-        .api  = (_api),                                                      \
-        .name = #_name,                                                      \
-        .ctx  = (_ctx),                                                      \
-    };                                                                       \
-    static void __attribute__((constructor))                                 \
-    _log_backend_register_##_name(void)                                      \
-    {                                                                        \
-        zsys_log_backend_register(&_log_backend_##_name);                    \
-    }
+#define LOG_BACKEND_DEFINE(_name, _api, _ctx)                                                      \
+	static const struct log_backend _log_backend_##_name = {                                   \
+		.api = (_api),                                                                     \
+		.name = #_name,                                                                    \
+		.ctx = (_ctx),                                                                     \
+	};                                                                                         \
+	static void __attribute__((constructor)) _log_backend_register_##_name(void)               \
+	{                                                                                          \
+		zsys_log_backend_register(&_log_backend_##_name);                                  \
+	}
 #else
-#define LOG_BACKEND_DEFINE(_name, _api, _ctx)                                \
-    static const struct log_backend                                          \
-        __attribute__((section(".log_backends"), used))                      \
-        _log_backend_##_name = {                                             \
-            .api  = (_api),                                                  \
-            .name = #_name,                                                  \
-            .ctx  = (_ctx),                                                  \
-        }
+#define LOG_BACKEND_DEFINE(_name, _api, _ctx)                                                      \
+	static const struct log_backend                                                            \
+		__attribute__((section(".log_backends"), used)) _log_backend_##_name = {           \
+			.api = (_api),                                                             \
+			.name = #_name,                                                            \
+			.ctx = (_ctx),                                                             \
+	}
 #endif
 
 #else

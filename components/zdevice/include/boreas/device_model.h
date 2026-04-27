@@ -18,13 +18,13 @@
 #include "esp_err.h"
 
 struct device {
-    const char *name;
-    const struct device *bus; /* parent bus device, NULL for bus controllers */
-    const void *api;          /* driver class vtable */
-    const void *config;       /* driver-specific static config (const) */
-    void *data;               /* driver-specific runtime state (mutable) */
-    bool *ready;              /* set true by device_init() on success */
-    esp_err_t (*init)(const struct device *dev);
+	const char *name;
+	const struct device *bus; /* parent bus device, NULL for bus controllers */
+	const void *api;          /* driver class vtable */
+	const void *config;       /* driver-specific static config (const) */
+	void *data;               /* driver-specific runtime state (mutable) */
+	bool *ready;              /* set true by device_init() on success */
+	esp_err_t (*init)(const struct device *dev);
 };
 
 /* Global device registry -- populated by DEVICE_DEFINE constructors */
@@ -40,7 +40,7 @@ esp_err_t device_init(const struct device *dev);
 
 static inline bool device_is_ready(const struct device *dev)
 {
-    return (dev != NULL) && (dev->ready != NULL) && (*dev->ready);
+	return (dev != NULL) && (dev->ready != NULL) && (*dev->ready);
 }
 
 /** Look up a device by name. Returns NULL if not found. */
@@ -61,23 +61,23 @@ const struct device *device_get_by_index(size_t idx);
  * inside a component static library has no other externally-referenced
  * symbols -- the device would silently not register.
  */
-#define DEVICE_DEFINE(_name, _init, _api, _config, _data, _bus)    \
-    static bool _name##_ready;                                      \
-    static DRAM_ATTR const struct device _name = {                  \
-        .name   = #_name,                                           \
-        .bus    = (_bus),                                           \
-        .api    = (_api),                                           \
-        .config = (_config),                                       \
-        .data   = (_data),                                         \
-        .ready  = &_name##_ready,                                  \
-        .init   = (_init),                                         \
-    };                                                              \
-    static void __attribute__((constructor))                        \
-    _device_register_##_name(void) {                               \
-        if (_device_count < CONFIG_DEVICE_REGISTRY_MAX) {          \
-            _device_registry[_device_count++] = &_name;            \
-        }                                                           \
-    }
+#define DEVICE_DEFINE(_name, _init, _api, _config, _data, _bus)                                    \
+	static bool _name##_ready;                                                                 \
+	static DRAM_ATTR const struct device _name = {                                             \
+		.name = #_name,                                                                    \
+		.bus = (_bus),                                                                     \
+		.api = (_api),                                                                     \
+		.config = (_config),                                                               \
+		.data = (_data),                                                                   \
+		.ready = &_name##_ready,                                                           \
+		.init = (_init),                                                                   \
+	};                                                                                         \
+	static void __attribute__((constructor)) _device_register_##_name(void)                    \
+	{                                                                                          \
+		if (_device_count < CONFIG_DEVICE_REGISTRY_MAX) {                                  \
+			_device_registry[_device_count++] = &_name;                                \
+		}                                                                                  \
+	}
 
 /**
  * Define and register a device instance with external (non-static) linkage.
@@ -95,20 +95,20 @@ const struct device *device_get_by_index(size_t idx);
  * The usual link-time caveat applies: the TU invoking this macro must be
  * linked whole into the image (e.g., in `main/`) so the constructor fires.
  */
-#define DEVICE_DEFINE_EXPORT(_name, _init, _api, _config, _data, _bus) \
-    static bool _name##_ready;                                          \
-    DRAM_ATTR const struct device _name = {                             \
-        .name   = #_name,                                               \
-        .bus    = (_bus),                                               \
-        .api    = (_api),                                               \
-        .config = (_config),                                           \
-        .data   = (_data),                                             \
-        .ready  = &_name##_ready,                                      \
-        .init   = (_init),                                             \
-    };                                                                  \
-    static void __attribute__((constructor))                            \
-    _device_register_##_name(void) {                                   \
-        if (_device_count < CONFIG_DEVICE_REGISTRY_MAX) {              \
-            _device_registry[_device_count++] = &_name;                \
-        }                                                               \
-    }
+#define DEVICE_DEFINE_EXPORT(_name, _init, _api, _config, _data, _bus)                             \
+	static bool _name##_ready;                                                                 \
+	DRAM_ATTR const struct device _name = {                                                    \
+		.name = #_name,                                                                    \
+		.bus = (_bus),                                                                     \
+		.api = (_api),                                                                     \
+		.config = (_config),                                                               \
+		.data = (_data),                                                                   \
+		.ready = &_name##_ready,                                                           \
+		.init = (_init),                                                                   \
+	};                                                                                         \
+	static void __attribute__((constructor)) _device_register_##_name(void)                    \
+	{                                                                                          \
+		if (_device_count < CONFIG_DEVICE_REGISTRY_MAX) {                                  \
+			_device_registry[_device_count++] = &_name;                                \
+		}                                                                                  \
+	}
