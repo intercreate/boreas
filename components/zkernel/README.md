@@ -11,6 +11,8 @@ Zephyr-compatible kernel primitives over FreeRTOS. All objects are statically al
 | `zephyr/sys/util.h` | `BIT`, `CONTAINER_OF`, `ARRAY_SIZE`, `BUILD_ASSERT`, etc. |
 | `zephyr/sys/dlist.h` | Intrusive doubly-linked list (`sys_dlist_t`) |
 | `zephyr/sys/slist.h` | Intrusive singly-linked list (`sys_slist_t`) |
+| `zephyr/sys/atomic.h` | Atomic ops (`atomic_t`, `atomic_get`/`set`/`or`/...) -- transitively included by `kernel.h` |
+| `zephyr/sys/byteorder.h` | Byte-buffer LE/BE access (`sys_get_le16`/`be16`/`le32`/`be32` + `put` variants) -- transitively included by `kernel.h` |
 | `zephyr/init.h` | `SYS_INIT` ordered initialization framework |
 | `zephyr/fatal.h` | `k_fatal_error`, assertion macros |
 
