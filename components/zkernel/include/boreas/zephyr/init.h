@@ -36,31 +36,31 @@ extern "C" {
 
 /* Init levels */
 enum sys_init_level {
-    SYS_INIT_LEVEL_EARLY = 0,
-    SYS_INIT_LEVEL_STORAGE,
-    SYS_INIT_LEVEL_DEVICE,
-    SYS_INIT_LEVEL_NETWORK,
-    SYS_INIT_LEVEL_APPLICATION,
-    SYS_INIT_LEVEL_COUNT,
+	SYS_INIT_LEVEL_EARLY = 0,
+	SYS_INIT_LEVEL_STORAGE,
+	SYS_INIT_LEVEL_DEVICE,
+	SYS_INIT_LEVEL_NETWORK,
+	SYS_INIT_LEVEL_APPLICATION,
+	SYS_INIT_LEVEL_COUNT,
 };
 
 #if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O (macOS host) doesn't accept plain section names. The linux-target
  * unit tests don't exercise SYS_INIT, so the attribute becomes a no-op here
  * and sys_init_run_all() treats the section as empty (see sys_init.c). */
-#define _BOREAS_SYS_INIT_SECTION_ATTR  __attribute__((unused))
+#define _BOREAS_SYS_INIT_SECTION_ATTR __attribute__((unused))
 #else
-#define _BOREAS_SYS_INIT_SECTION_ATTR  __attribute__((section(".sys_init_entries"), used))
+#define _BOREAS_SYS_INIT_SECTION_ATTR __attribute__((section(".sys_init_entries"), used))
 #endif
 
 typedef int (*sys_init_fn_t)(void);
 
 struct sys_init_entry {
-    sys_init_fn_t    init_fn;
-    sys_init_fn_t    shutdown_fn; /* NULL if no shutdown needed */
-    enum sys_init_level level;
-    uint8_t          priority; /* 0-255, lower = earlier within level */
-    const char      *name;
+	sys_init_fn_t init_fn;
+	sys_init_fn_t shutdown_fn; /* NULL if no shutdown needed */
+	enum sys_init_level level;
+	uint8_t priority; /* 0-255, lower = earlier within level */
+	const char *name;
 };
 
 /**
@@ -78,30 +78,28 @@ struct sys_init_entry {
  * This matches ESP-IDF's own constraint on `ESP_SYSTEM_INIT_FN`
  * (see `esp_system/include/esp_private/startup_internal.h`).
  */
-#define SYS_INIT(_init_fn, _level, _prio)                                     \
-    static const struct sys_init_entry                                        \
-        _BOREAS_SYS_INIT_SECTION_ATTR                                         \
-        _sys_init_entry_##_init_fn = {                                        \
-            .init_fn     = (_init_fn),                                        \
-            .shutdown_fn = NULL,                                              \
-            .level       = SYS_INIT_LEVEL_##_level,                           \
-            .priority    = (_prio),                                           \
-            .name        = #_init_fn,                                         \
-        }
+#define SYS_INIT(_init_fn, _level, _prio)                                                          \
+	static const struct sys_init_entry _BOREAS_SYS_INIT_SECTION_ATTR                           \
+		_sys_init_entry_##_init_fn = {                                                     \
+			.init_fn = (_init_fn),                                                     \
+			.shutdown_fn = NULL,                                                       \
+			.level = SYS_INIT_LEVEL_##_level,                                          \
+			.priority = (_prio),                                                       \
+			.name = #_init_fn,                                                         \
+	}
 
 /**
  * Register init + shutdown pair.
  */
-#define SYS_INIT_WITH_SHUTDOWN(_init_fn, _shutdown_fn, _level, _prio)         \
-    static const struct sys_init_entry                                        \
-        _BOREAS_SYS_INIT_SECTION_ATTR                                         \
-        _sys_init_entry_##_init_fn = {                                        \
-            .init_fn     = (_init_fn),                                        \
-            .shutdown_fn = (_shutdown_fn),                                    \
-            .level       = SYS_INIT_LEVEL_##_level,                           \
-            .priority    = (_prio),                                           \
-            .name        = #_init_fn,                                         \
-        }
+#define SYS_INIT_WITH_SHUTDOWN(_init_fn, _shutdown_fn, _level, _prio)                              \
+	static const struct sys_init_entry _BOREAS_SYS_INIT_SECTION_ATTR                           \
+		_sys_init_entry_##_init_fn = {                                                     \
+			.init_fn = (_init_fn),                                                     \
+			.shutdown_fn = (_shutdown_fn),                                             \
+			.level = SYS_INIT_LEVEL_##_level,                                          \
+			.priority = (_prio),                                                       \
+			.name = #_init_fn,                                                         \
+	}
 
 /**
  * Run all registered init functions in order.

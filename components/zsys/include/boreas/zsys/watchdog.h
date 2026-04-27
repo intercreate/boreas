@@ -29,10 +29,10 @@ extern "C" {
 typedef void (*zsys_watchdog_timeout_cb_t)(const char *name);
 
 struct zsys_watchdog_entry {
-    const char *name;
-    int64_t     timeout_ms;
-    int64_t     last_feed_ms;
-    bool        active;
+	const char *name;
+	int64_t timeout_ms;
+	int64_t last_feed_ms;
+	bool active;
 };
 
 /**
@@ -42,14 +42,13 @@ struct zsys_watchdog_entry {
  * @param check_interval  How often the supervisor checks feeds.
  * @param timeout_cb      Called when a subsystem misses its deadline.
  */
-void zsys_watchdog_init(k_timeout_t check_interval,
-                        zsys_watchdog_timeout_cb_t timeout_cb);
+void zsys_watchdog_init(k_timeout_t check_interval, zsys_watchdog_timeout_cb_t timeout_cb);
 
 /**
  * Register a subsystem watchdog.
  */
-int zsys_watchdog_register(struct zsys_watchdog_entry *entry,
-                           const char *name, k_timeout_t timeout);
+int zsys_watchdog_register(struct zsys_watchdog_entry *entry, const char *name,
+			   k_timeout_t timeout);
 
 /**
  * Feed (reset) a subsystem's watchdog timer.

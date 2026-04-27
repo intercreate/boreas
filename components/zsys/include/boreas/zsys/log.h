@@ -62,48 +62,42 @@ extern "C" {
  * as ESP-IDF's ESP_SYSTEM_INIT_FN and boreas's SYS_INIT / DEVICE_DEFINE.)
  */
 struct zsys_log_module_desc {
-    const char     *name;
-    esp_log_level_t default_level;
+	const char *name;
+	esp_log_level_t default_level;
 };
 
 #if defined(CONFIG_IDF_TARGET_LINUX)
 /* Mach-O (macOS host) doesn't accept plain section names. The linux-target
  * unit test executable is whole-linked, so the legacy constructor path is
  * safe here -- no archive-stripping risk to work around. */
-#define LOG_MODULE_REGISTER(module_name, default_level_)                    \
-    static const char *TAG = #module_name;                                  \
-    static void __attribute__((constructor))                                \
-    _zsys_log_module_register_##module_name(void)                           \
-    {                                                                       \
-        esp_log_level_set(#module_name, (esp_log_level_t)(default_level_)); \
-        zsys_log_register_module(#module_name,                              \
-                                 (esp_log_level_t)(default_level_));        \
-    }
+#define LOG_MODULE_REGISTER(module_name, default_level_)                                           \
+	static const char *TAG = #module_name;                                                     \
+	static void __attribute__((constructor)) _zsys_log_module_register_##module_name(void)     \
+	{                                                                                          \
+		esp_log_level_set(#module_name, (esp_log_level_t)(default_level_));                \
+		zsys_log_register_module(#module_name, (esp_log_level_t)(default_level_));         \
+	}
 #else
-#define LOG_MODULE_REGISTER(module_name, default_level_)                    \
-    static const char *TAG = #module_name;                                  \
-    static const struct zsys_log_module_desc                                \
-        __attribute__((section(".log_module_entries"), used))               \
-        _zsys_log_module_desc_##module_name = {                             \
-            .name          = #module_name,                                  \
-            .default_level = (esp_log_level_t)(default_level_),             \
-        }
+#define LOG_MODULE_REGISTER(module_name, default_level_)                                           \
+	static const char *TAG = #module_name;                                                     \
+	static const struct zsys_log_module_desc __attribute__((                                   \
+		section(".log_module_entries"), used)) _zsys_log_module_desc_##module_name = {     \
+		.name = #module_name,                                                              \
+		.default_level = (esp_log_level_t)(default_level_),                                \
+	}
 #endif
 
 /**
  * Declare use of a log module registered in another file.
  * Shares the same TAG and level control as the registering file.
  */
-#define LOG_MODULE_DECLARE(module_name) \
-    extern const char *TAG
+#define LOG_MODULE_DECLARE(module_name) extern const char *TAG
 
 #else
 
-#define LOG_MODULE_REGISTER(module_name, default_level) \
-    static const char *TAG = #module_name
+#define LOG_MODULE_REGISTER(module_name, default_level) static const char *TAG = #module_name
 
-#define LOG_MODULE_DECLARE(module_name) \
-    extern const char *TAG
+#define LOG_MODULE_DECLARE(module_name) extern const char *TAG
 
 #endif
 
@@ -120,24 +114,24 @@ struct zsys_log_module_desc {
 
 #if defined(CONFIG_ZSYS_LOG_MODULE)
 
-#define _ZSYS_LOG(_level, _tag, _fmt, ...)                                  \
-    do {                                                                     \
-        if ((_level) <= CONFIG_ZSYS_LOG_MAX_LEVEL) {                        \
-            zsys_log_msg_emit((_level), (_tag), _fmt, ##__VA_ARGS__);       \
-        }                                                                    \
-    } while (0)
+#define _ZSYS_LOG(_level, _tag, _fmt, ...)                                                         \
+	do {                                                                                       \
+		if ((_level) <= CONFIG_ZSYS_LOG_MAX_LEVEL) {                                       \
+			zsys_log_msg_emit((_level), (_tag), _fmt, ##__VA_ARGS__);                  \
+		}                                                                                  \
+	} while (0)
 
 #define LOG_ERR(fmt, ...) _ZSYS_LOG(LOG_LEVEL_ERR, TAG, fmt, ##__VA_ARGS__)
 #define LOG_WRN(fmt, ...) _ZSYS_LOG(LOG_LEVEL_WRN, TAG, fmt, ##__VA_ARGS__)
 #define LOG_INF(fmt, ...) _ZSYS_LOG(LOG_LEVEL_INF, TAG, fmt, ##__VA_ARGS__)
 #define LOG_DBG(fmt, ...) _ZSYS_LOG(LOG_LEVEL_DBG, TAG, fmt, ##__VA_ARGS__)
 
-#define _ZSYS_LOG_HEXDUMP(_level, _tag, _data, _len, _label)               \
-    do {                                                                     \
-        if ((_level) <= CONFIG_ZSYS_LOG_MAX_LEVEL) {                        \
-            zsys_log_hexdump((_level), (_tag), (_data), (_len), (_label));  \
-        }                                                                    \
-    } while (0)
+#define _ZSYS_LOG_HEXDUMP(_level, _tag, _data, _len, _label)                                       \
+	do {                                                                                       \
+		if ((_level) <= CONFIG_ZSYS_LOG_MAX_LEVEL) {                                       \
+			zsys_log_hexdump((_level), (_tag), (_data), (_len), (_label));             \
+		}                                                                                  \
+	} while (0)
 
 #define LOG_HEXDUMP_ERR(data, len, label) _ZSYS_LOG_HEXDUMP(LOG_LEVEL_ERR, TAG, data, len, label)
 #define LOG_HEXDUMP_WRN(data, len, label) _ZSYS_LOG_HEXDUMP(LOG_LEVEL_WRN, TAG, data, len, label)
@@ -167,9 +161,8 @@ struct zsys_log_module_desc {
  * Emit a log message. Handles runtime level check and sync/deferred dispatch.
  * ISR-safe when deferred mode is active.
  */
-void zsys_log_msg_emit(uint8_t level, const char *module,
-                       const char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+void zsys_log_msg_emit(uint8_t level, const char *module, const char *fmt, ...)
+	__attribute__((format(printf, 3, 4)));
 
 /**
  * Initialize the logging subsystem.
@@ -196,18 +189,18 @@ uint32_t zsys_log_get_dropped_count(void);
  * Log a hex dump of binary data. Output as one message per 16-byte line.
  * Goes through the same dispatch path as LOG_* (backends, deferred mode).
  */
-void zsys_log_hexdump(uint8_t level, const char *module,
-                      const void *data, size_t len, const char *label);
+void zsys_log_hexdump(uint8_t level, const char *module, const void *data, size_t len,
+		      const char *label);
 
 /* --------------------------------------------------------------------------
  * Module registry API (unchanged)
  * -------------------------------------------------------------------------- */
 
 void zsys_log_register_module(const char *name, esp_log_level_t default_level);
-int  zsys_log_set_level(const char *module_name, esp_log_level_t level);
+int zsys_log_set_level(const char *module_name, esp_log_level_t level);
 void zsys_log_list_modules(void);
-int  zsys_log_get_module_count(void);
-int  zsys_log_get_module_info(int index, const char **name, int *level);
+int zsys_log_get_module_count(void);
+int zsys_log_get_module_info(int index, const char **name, int *level);
 
 #ifdef __cplusplus
 }
