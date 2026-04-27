@@ -4,6 +4,11 @@
  *
  * Zephyr-compatible byte-order helpers for little- and big-endian
  * 16- and 32-bit access over byte buffers.
+ *
+ * @note Upstream Zephyr also provides 24/48/64-bit variants
+ *       (sys_{get,put}_{le,be}{24,48,64}). These are intentionally
+ *       not yet provided by Boreas; add them here, mirroring
+ *       upstream's chained implementation, when a caller needs them.
  */
 #pragma once
 
@@ -37,30 +42,24 @@ static inline void sys_put_be16(uint16_t val, uint8_t dst[2])
 
 static inline uint32_t sys_get_le32(const uint8_t src[4])
 {
-    return (uint32_t)src[0] | ((uint32_t)src[1] << 8) |
-           ((uint32_t)src[2] << 16) | ((uint32_t)src[3] << 24);
+    return ((uint32_t)sys_get_le16(&src[2]) << 16) | sys_get_le16(&src[0]);
 }
 
 static inline void sys_put_le32(uint32_t val, uint8_t dst[4])
 {
-    dst[0] = (uint8_t)(val & 0xFF);
-    dst[1] = (uint8_t)((val >> 8) & 0xFF);
-    dst[2] = (uint8_t)((val >> 16) & 0xFF);
-    dst[3] = (uint8_t)((val >> 24) & 0xFF);
+    sys_put_le16((uint16_t)val, dst);
+    sys_put_le16((uint16_t)(val >> 16), &dst[2]);
 }
 
 static inline uint32_t sys_get_be32(const uint8_t src[4])
 {
-    return ((uint32_t)src[0] << 24) | ((uint32_t)src[1] << 16) |
-           ((uint32_t)src[2] << 8) | (uint32_t)src[3];
+    return ((uint32_t)sys_get_be16(&src[0]) << 16) | sys_get_be16(&src[2]);
 }
 
 static inline void sys_put_be32(uint32_t val, uint8_t dst[4])
 {
-    dst[0] = (uint8_t)((val >> 24) & 0xFF);
-    dst[1] = (uint8_t)((val >> 16) & 0xFF);
-    dst[2] = (uint8_t)((val >> 8) & 0xFF);
-    dst[3] = (uint8_t)(val & 0xFF);
+    sys_put_be16((uint16_t)(val >> 16), dst);
+    sys_put_be16((uint16_t)val, &dst[2]);
 }
 
 #ifdef __cplusplus
