@@ -58,11 +58,15 @@ linux and ESP32-S3 targets.
 
 ## Coding Standards
 
-- Follow the existing code style (K&R braces, 4-space indent, `snake_case`).
-- Public APIs use Zephyr naming conventions (`k_*`, `sys_*`, `device_*`).
-- Keep headers minimal -- only expose what downstream code needs.
-- Use Kconfig for compile-time feature gates, not `#ifdef` with ad-hoc defines.
-- Add a brief doc comment for any new public function or macro.
+Boreas follows [Zephyr's coding style](https://docs.zephyrproject.org/latest/contribute/style/index.html). The repo ships Zephyr's `.clang-format` at the root -- run `clang-format -i` on changed files before submitting.
+
+- **Formatting**: tabs (8-wide), K&R braces, 100-column soft wrap, `snake_case` identifiers. Enforced by `clang-format`.
+- **Public API naming**: Zephyr conventions (`k_*`, `sys_*`, `device_*`, `z_*` for upstream-mirrored internals). Project-private helpers with no Zephyr analogue use `boreas_*`.
+- **Struct vs typedef**: Types the caller initializes, inspects, or stack-allocates use explicit `struct` (e.g. `struct k_sem`). Opaque handles and callback signatures may `typedef` with `_t`. Don't typedef-hide a struct whose fields callers touch.
+- **Headers**: Public Zephyr-mirrored headers live under `include/zephyr/...` and match upstream paths. Keep headers minimal -- only expose what downstream code needs.
+- **Kconfig**: Use `CONFIG_*` symbols (with help text, defaults, `depends on`/`select`) for feature gates, not `#ifdef` with ad-hoc defines.
+- **Doxygen**: Add `@brief`/`@param`/`@return` for any new public function or macro. Behavioral divergences from upstream Zephyr go in an `@note` on the declaration.
+- **License headers**: New files include an SPDX line and copyright matching project convention.
 
 ## Pull Request Guidelines
 

@@ -30,6 +30,8 @@
 #include <sys/time.h>
 #endif
 
+#include "zephyr/sys/atomic.h"
+#include "zephyr/sys/byteorder.h"
 #include "zephyr/sys/dlist.h"
 #include "zephyr/sys/time_units.h"
 #include "zephyr/sys/util.h"
