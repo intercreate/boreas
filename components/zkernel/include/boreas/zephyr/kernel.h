@@ -83,7 +83,13 @@ static inline void k_msleep(int32_t ms)
 	vTaskDelay(pdMS_TO_TICKS(ms));
 }
 
-static inline void k_sleep(k_timeout_t timeout)
+/**
+ * Sleep for the given timeout. Returns the time remaining if the
+ * sleep was interrupted; 0 otherwise. Boreas does not currently
+ * support interruptible sleeps, so this always returns 0 — the
+ * return type matches upstream Zephyr so ports compile cleanly.
+ */
+static inline int32_t k_sleep(k_timeout_t timeout)
 {
 	if (k_timeout_is_no_wait(timeout)) {
 		taskYIELD();
@@ -92,16 +98,23 @@ static inline void k_sleep(k_timeout_t timeout)
 	} else {
 		vTaskDelay(k_timeout_to_ticks(timeout));
 	}
+	return 0;
 }
 
-static inline void k_usleep(int32_t us)
+/**
+ * Sleep for @p us microseconds. Returns the time remaining if
+ * interrupted; 0 otherwise. See k_sleep() for the interruption
+ * caveat. Sub-millisecond sleeps busy-wait via esp_rom_delay_us
+ * (FreeRTOS tick granularity does not allow finer task-yield).
+ */
+static inline int32_t k_usleep(int32_t us)
 {
-	/* FreeRTOS tick resolution limits this; sub-ms sleeps busy-wait */
 	if (us >= 1000) {
 		vTaskDelay(pdMS_TO_TICKS(us / 1000));
 	} else if (us > 0) {
 		esp_rom_delay_us(us);
 	}
+	return 0;
 }
 
 static inline void k_yield(void)
@@ -118,9 +131,31 @@ struct k_sem {
 	StaticSemaphore_t buffer;
 };
 
-#define K_SEM_DEFINE(name, initial, limit)                                                         \
-	struct k_sem name = {0}; /* call k_sem_init at runtime                                     \
-				  */
+/**
+ * Statically declare a semaphore and auto-initialize it with the
+ * given @p initial count and @p limit before main() runs.
+ *
+ * Implementation note: FreeRTOS counting semaphores require a runtime
+ * xSemaphoreCreateCountingStatic() call, so true compile-time init
+ * isn't possible. The macro emits a per-instance constructor that
+ * runs at startup (same pattern as k_sys_work_q auto-init in
+ * components/zkernel/src/k_work.c). This means the sem is ready for
+ * use from any other constructor or SYS_INIT-time code that runs
+ * after this TU's constructors.
+ *
+ * Caveat: when this macro expands inside an object file that lives
+ * in a static archive, the constructor can be stripped by the
+ * linker unless the archive is pulled in via WHOLE_ARCHIVE (see
+ * idf_component_register WHOLE_ARCHIVE). User application code
+ * typically isn't in such an archive, but library/component code
+ * is — pair with WHOLE_ARCHIVE there.
+ */
+#define K_SEM_DEFINE(name, _initial, _limit)                                                       \
+	struct k_sem name = {0};                                                                   \
+	__attribute__((constructor)) static void _k_sem_init_##name(void)                          \
+	{                                                                                          \
+		k_sem_init(&name, (_initial), (_limit));                                           \
+	}
 
 int k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit);
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout);
@@ -251,7 +286,9 @@ uint32_t k_timer_status_get(struct k_timer *timer);
  *  Returns 0 immediately if the timer is stopped. */
 uint32_t k_timer_status_sync(struct k_timer *timer);
 
-int64_t k_timer_remaining_get(struct k_timer *timer);
+/** Time remaining until the next expiry, in milliseconds. Returns 0
+ *  if the timer is stopped or has already expired. */
+uint32_t k_timer_remaining_get(struct k_timer *timer);
 void k_timer_user_data_set(struct k_timer *timer, void *user_data);
 void *k_timer_user_data_get(struct k_timer *timer);
 
@@ -410,9 +447,15 @@ struct k_thread {
 
 typedef TaskHandle_t k_tid_t;
 
-void k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
-		     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
-		     uint32_t options, k_timeout_t delay);
+/**
+ * Create and start (or defer start of) a thread. Returns the thread
+ * ID on success, or NULL on failure (e.g. xTaskCreateStatic returned
+ * NULL). Matches upstream Zephyr's return type so the common
+ * `tid = k_thread_create(...)` chain compiles cleanly.
+ */
+k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
+			k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
+			uint32_t options, k_timeout_t delay);
 void k_thread_name_set(struct k_thread *thread, const char *name);
 void k_thread_abort(struct k_thread *thread);
 void k_thread_suspend(struct k_thread *thread);

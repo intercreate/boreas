@@ -123,7 +123,7 @@ uint32_t k_timer_status_sync(struct k_timer *timer)
 	return k_timer_status_get(timer);
 }
 
-int64_t k_timer_remaining_get(struct k_timer *timer)
+uint32_t k_timer_remaining_get(struct k_timer *timer)
 {
 	if (!timer->running || timer->handle == NULL) {
 		return 0;
@@ -135,7 +135,7 @@ int64_t k_timer_remaining_get(struct k_timer *timer)
 	}
 	int64_t now = esp_timer_get_time();
 	int64_t remaining_us = (int64_t)expiry - now;
-	return (remaining_us > 0) ? (remaining_us / 1000) : 0;
+	return (remaining_us > 0) ? (uint32_t)(remaining_us / 1000) : 0;
 }
 
 void k_timer_user_data_set(struct k_timer *timer, void *user_data)
