@@ -36,9 +36,9 @@ static void k_thread_delay_expiry(struct k_timer *timer)
 	}
 }
 
-void k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
-		     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
-		     uint32_t options, k_timeout_t delay)
+k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
+			k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
+			uint32_t options, k_timeout_t delay)
 {
 	(void)options;
 
@@ -59,7 +59,7 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_s
 
 	if (thread->handle == NULL) {
 		ESP_LOGE(TAG, "Failed to create thread");
-		return;
+		return NULL;
 	}
 
 	if (!k_timeout_is_forever(delay) && !k_timeout_is_no_wait(delay)) {
@@ -70,6 +70,8 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_s
 	}
 	/* K_FOREVER: thread self-suspended, user calls k_thread_resume */
 	/* K_NO_WAIT: _start_suspended=false, thread runs immediately */
+
+	return thread->handle;
 }
 
 void k_thread_name_set(struct k_thread *thread, const char *name)

@@ -47,10 +47,48 @@ static void test_yield(void)
 	TEST_ASSERT_LESS_OR_EQUAL(10, elapsed);
 }
 
+static void test_sleep_returns_zero(void)
+{
+	/* Zephyr-compat: k_sleep / k_usleep return int32_t (remaining
+	 * time when interrupted). Boreas doesn't support interruption
+	 * yet, so they always return 0. Verify the type is callable in
+	 * the chained-return form. */
+	int32_t rem = k_sleep(K_MSEC(1));
+	TEST_ASSERT_EQUAL(0, rem);
+	rem = k_usleep(100);
+	TEST_ASSERT_EQUAL(0, rem);
+}
+
+static void test_usleep_sub_ms(void)
+{
+	/* Sub-millisecond path uses esp_rom_delay_us busy-wait. Verify
+	 * it actually delays (no early return) and stays bounded. */
+	int64_t before = esp_timer_get_time();
+	k_usleep(500);
+	int64_t elapsed_us = esp_timer_get_time() - before;
+
+	TEST_ASSERT_GREATER_OR_EQUAL(400, elapsed_us);
+	TEST_ASSERT_LESS_OR_EQUAL(2000, elapsed_us);
+}
+
+static void test_usleep_ms_path(void)
+{
+	/* >=1000us takes the vTaskDelay path; allow tick-granularity slack. */
+	int64_t before = k_uptime_get();
+	k_usleep(20000); /* 20ms */
+	int64_t elapsed = k_uptime_get() - before;
+
+	TEST_ASSERT_GREATER_OR_EQUAL(15, elapsed);
+	TEST_ASSERT_LESS_OR_EQUAL(60, elapsed);
+}
+
 void test_sleep_group(void)
 {
 	RUN_TEST(test_msleep);
 	RUN_TEST(test_sleep_with_timeout);
 	RUN_TEST(test_sleep_no_wait);
 	RUN_TEST(test_yield);
+	RUN_TEST(test_sleep_returns_zero);
+	RUN_TEST(test_usleep_sub_ms);
+	RUN_TEST(test_usleep_ms_path);
 }
