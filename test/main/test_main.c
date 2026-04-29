@@ -14,6 +14,7 @@ void test_timeout_group(void);
 void test_slist_group(void);
 void test_dlist_group(void);
 void test_byteorder_group(void);
+void test_atomic_group(void);
 void test_k_sem_group(void);
 void test_k_mutex_group(void);
 void test_k_msgq_group(void);
@@ -47,6 +48,7 @@ void app_main(void)
 	test_slist_group();
 	test_dlist_group();
 	test_byteorder_group();
+	test_atomic_group();
 
 	/* Layer 1: Kernel primitives */
 	test_k_sem_group();

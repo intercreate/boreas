@@ -7,10 +7,6 @@
 
 #include <errno.h>
 
-#include "esp_log.h"
-
-static const char *TAG = "k_thread";
-
 /* Trampoline: adapts Zephyr's 3-arg entry to FreeRTOS's 1-arg entry.
  * If _start_suspended is set, suspends self before calling entry
  * (used for K_FOREVER and finite-delay deferred start).
@@ -36,9 +32,9 @@ static void k_thread_delay_expiry(struct k_timer *timer)
 	}
 }
 
-void k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
-		     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
-		     uint32_t options, k_timeout_t delay)
+k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
+			k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
+			uint32_t options, k_timeout_t delay)
 {
 	(void)options;
 
@@ -57,10 +53,11 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_s
 		k_thread_entry_wrapper, thread->name ? thread->name : "k_thread",
 		stack_size / sizeof(StackType_t), thread, prio, stack, &thread->tcb);
 
-	if (thread->handle == NULL) {
-		ESP_LOGE(TAG, "Failed to create thread");
-		return;
-	}
+	/* xTaskCreateStatic only fails on programmer error (misaligned
+	 * stack, NULL stack pointer, etc.). Match upstream Zephyr's
+	 * "always returns a valid tid" contract by asserting here rather
+	 * than returning NULL -- callers ported from Zephyr won't check. */
+	__ASSERT(thread->handle != NULL, "k_thread_create: xTaskCreateStatic failed");
 
 	if (!k_timeout_is_forever(delay) && !k_timeout_is_no_wait(delay)) {
 		/* Finite delay: thread self-suspended, set up timer to resume */
@@ -70,6 +67,8 @@ void k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_s
 	}
 	/* K_FOREVER: thread self-suspended, user calls k_thread_resume */
 	/* K_NO_WAIT: _start_suspended=false, thread runs immediately */
+
+	return thread->handle;
 }
 
 void k_thread_name_set(struct k_thread *thread, const char *name)
