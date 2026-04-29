@@ -450,14 +450,14 @@ void k_work_queue_start(struct k_work_q *queue, k_thread_stack_t *stack, size_t 
  *
  * Submits a sentinel work item and waits for it to run, which
  * guarantees every earlier item submitted *before* the drain call
- * has finished.
+ * has finished. Items submitted *during* drain are NOT guaranteed
+ * to be drained -- they race normally with the sentinel.
  *
  * @param queue  Queue to drain.
  * @param plug   Currently ignored on Boreas; reserved for upstream
  *               parity. Upstream Zephyr blocks new submissions until
  *               k_work_queue_unplug() is called; Boreas does not
- *               implement plugging, so new submits during drain
- *               race normally with the sentinel.
+ *               implement plugging.
  *
  * @return 0 on success; negative errno on failure.
  */
@@ -468,9 +468,14 @@ int k_work_queue_drain(struct k_work_q *queue, bool plug);
  *
  * Auto-initialized before main() via constructor. Priority and stack
  * size come from CONFIG_SYSTEM_WORKQUEUE_PRIORITY /
- * CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE (Kconfig). Ready to use from
- * app_main(), SYS_INIT callbacks, and other constructors that run
- * after zkernel's constructor.
+ * CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE (Kconfig).
+ *
+ * @note ESP-IDF Xtensa: as with K_SEM_DEFINE'd sems, the system
+ *       workqueue is NOT guaranteed ready inside arbitrary user
+ *       constructors -- ESP-IDF iterates .init_array in descending
+ *       order, and within a TU the LAST-declared constructor runs
+ *       first. The queue IS ready by app_main() and SYS_INIT
+ *       callbacks. k_work_submit() returns -EINVAL until then.
  */
 extern struct k_work_q k_sys_work_q;
 

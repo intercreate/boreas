@@ -162,7 +162,7 @@ Use the upstream Zephyr pattern -- there is no `K_WORK_QUEUE_DEFINE` macro:
 K_THREAD_STACK_DEFINE(my_wq_stack, 4096);
 static struct k_work_q my_wq;
 
-const struct k_work_q_config cfg = {
+const struct k_work_queue_config cfg = {
     .name = "my_wq",
     .no_yield = false,
 };
