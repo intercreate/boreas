@@ -90,9 +90,8 @@ void app_main(void)
 {
 	LOG_INF("=== Boreas Work Queue Demo ===");
 
-	/* Start the system work queue (required before submitting work) */
-	k_work_queue_init(&k_sys_work_q);
-	k_work_queue_start(&k_sys_work_q, "sys_wq", 4096, 5);
+	/* System work queue is auto-initialized before main() via constructor.
+	 * Priority/stack come from CONFIG_SYSTEM_WORKQUEUE_*. No init call needed. */
 
 	/* --- Example 1: Periodic timer --- */
 	LOG_INF("Starting heartbeat timer (every 1s, runs for 5s)...");
