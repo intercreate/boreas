@@ -143,6 +143,9 @@ int k_work_submit(struct k_work *work)
 
 int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work)
 {
+	if (!(__atomic_load_n(&queue->flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
+		return -EINVAL;
+	}
 	return k_work_submit_internal(queue, work);
 }
 
@@ -274,6 +277,9 @@ int k_work_queue_drain(struct k_work_q *queue, bool plug)
 {
 	(void)plug; /* Boreas does not implement plugging; reserved for upstream parity. */
 
+	/* Sentinel is stack-allocated -- safe because xSemaphoreGive does
+	 * not access the sem after returning, so by the time k_sem_take
+	 * wakes the drain caller, the worker is finished with `s`. */
 	struct z_work_drain_sentinel s;
 	k_work_init(&s.work, z_work_drain_handler);
 	k_sem_init(&s.sem, 0, 1);
