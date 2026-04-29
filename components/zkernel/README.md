@@ -137,9 +137,48 @@ k_work_flush(&work, &sync);
 
 // Cancel + wait for completion
 k_work_cancel_sync(&work, &sync);
+
+// Inspect state (K_WORK_QUEUED | RUNNING | CANCELING bitmask)
+uint32_t flags = k_work_busy_get(&work);
 ```
 
-System work queue is auto-initialized before `main()` via constructor. Custom work queues via `K_WORK_QUEUE_DEFINE(name, depth, stack_size)`.
+Backed internally by an intrusive `sys_dlist_t` of pending items + a counting `k_sem` to wake the worker. Mutations are guarded by a per-queue spinlock (`portMUX_TYPE`), ISR-safe. **`k_work_cancel` synchronously removes the item from the queue** -- matches upstream Zephyr's contract.
+
+### System work queue
+
+Auto-initialized before `main()` via constructor. Priority and stack size come from Kconfig:
+
+- `CONFIG_SYSTEM_WORKQUEUE_PRIORITY` (default 5)
+- `CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE` (default 4096)
+- `CONFIG_SYSTEM_WORKQUEUE_NO_YIELD` (default n)
+
+Ready to use from `app_main`, `SYS_INIT` callbacks, and constructors that run after zkernel's.
+
+### Custom work queues
+
+Use the upstream Zephyr pattern -- there is no `K_WORK_QUEUE_DEFINE` macro:
+
+```c
+K_THREAD_STACK_DEFINE(my_wq_stack, 4096);
+static struct k_work_q my_wq;
+
+const struct k_work_queue_config cfg = {
+    .name = "my_wq",
+    .no_yield = false,
+};
+k_work_queue_start(&my_wq, my_wq_stack, K_THREAD_STACK_SIZEOF(my_wq_stack),
+                   K_PRIO_PREEMPT(5), &cfg);
+
+k_work_submit_to_queue(&my_wq, &work);
+k_work_schedule_for_queue(&my_wq, &dwork, K_MSEC(100));
+
+// Block until pending work has completed (submits a sentinel internally)
+k_work_queue_drain(&my_wq, false);
+```
+
+`struct k_work_queue_config` matches upstream: `name`, `no_yield`, `essential`. The `essential` field is currently ignored on Boreas. The `bool plug` parameter on `k_work_queue_drain` is reserved for upstream parity but currently a no-op (Boreas does not implement plugging).
+
+Priorities can be specified with `K_PRIO_PREEMPT(p)` (mirrors upstream Zephyr's preemptible-priority macro). On ESP-IDF/FreeRTOS this maps to a numeric task priority; cooperative threads (`K_PRIO_COOP`) map identically since FreeRTOS does not distinguish.
 
 ## Thread (`k_thread`)
 
