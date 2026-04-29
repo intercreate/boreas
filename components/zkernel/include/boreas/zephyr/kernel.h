@@ -417,11 +417,28 @@ int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work);
  * via sys_dlist_remove). Cannot cancel a work item that is currently
  * running -- use k_work_cancel_sync() to wait for completion.
  *
+ * @note If a flush waiter (k_work_flush / k_work_cancel_sync) is
+ *       attached when a queued item is cancelled, the waiter is
+ *       released here -- the cancelled item will never run, so
+ *       the worker can no longer signal it.
+ *
  * @return true if the item was cancelled (or was not queued), false
  *         if the item is currently running.
  */
 bool k_work_cancel(struct k_work *work);
 bool k_work_is_pending(struct k_work *work);
+
+/**
+ * Block until @p work has completed (or returns immediately if not
+ * pending).
+ *
+ * @note Only one flush may be in flight per work item at a time --
+ *       k_work_flush and k_work_cancel_sync share the work->sync
+ *       slot. A concurrent second call overwrites the first
+ *       waiter's sync pointer, leaving the first caller blocked
+ *       forever. Boreas does not implement upstream Zephyr's
+ *       wait-queue model.
+ */
 int k_work_flush(struct k_work *work, struct k_work_sync *sync);
 int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync);
 

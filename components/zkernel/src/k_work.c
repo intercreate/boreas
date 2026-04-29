@@ -161,6 +161,8 @@ bool k_work_cancel(struct k_work *work)
 		return true;
 	}
 
+	struct k_work_sync *sync_to_release = NULL;
+
 	z_work_lock(queue);
 
 	/* Re-validate the queue under lock: between our read of work->queue
@@ -177,9 +179,23 @@ bool k_work_cancel(struct k_work *work)
 		sys_dlist_remove(&work->node);
 		__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
 		__atomic_store_n(&work->queue, NULL, __ATOMIC_RELEASE);
+
+		/* If a flush waiter (k_work_flush / k_work_cancel_sync) is
+		 * attached, release it here -- the cancelled item will never
+		 * run to completion on a worker thread, so the worker won't
+		 * give the sem. Atomic exchange so only one path consumes it
+		 * (defensive against a concurrent worker giving for a stale
+		 * sync pointer). k_sem_give itself is hoisted outside the
+		 * critical section to avoid calling FreeRTOS API from
+		 * portENTER_CRITICAL. */
+		sync_to_release = __atomic_exchange_n(&work->sync, NULL, __ATOMIC_ACQ_REL);
 	}
 
 	z_work_unlock(queue);
+
+	if (sync_to_release != NULL) {
+		k_sem_give(&sync_to_release->sem);
+	}
 
 	/* The sem give that submit issued for this item will cause one
 	 * spurious worker wakeup; it pops a NULL and loops. Harmless. */
