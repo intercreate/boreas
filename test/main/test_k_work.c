@@ -406,6 +406,59 @@ static void test_work_init_macro_static(void)
 	TEST_ASSERT_EQUAL(0, container.w.flags);
 }
 
+/* Regression for the deadlock that occurred when k_work_cancel removed a
+ * QUEUED item without releasing any flush waiter on work->sync. Helper
+ * thread calls k_work_flush; main thread cancels the victim. Without the
+ * fix, the flush helper blocks forever and this test times out. */
+K_THREAD_STACK_DEFINE(flush_helper_stack, 4096);
+static struct k_thread flush_helper;
+static volatile bool flush_returned;
+static struct k_work flush_victim;
+static struct k_work_sync flush_sync;
+
+static void flush_helper_entry(void *p1, void *p2, void *p3)
+{
+	(void)p1;
+	(void)p2;
+	(void)p3;
+	k_work_flush(&flush_victim, &flush_sync);
+	flush_returned = true;
+	vTaskSuspend(NULL);
+}
+
+static void test_work_flush_unblocked_by_cancel(void)
+{
+	struct k_work blocker;
+	k_work_init(&blocker, blocking_handler);
+	k_work_init(&flush_victim, test_work_handler);
+	k_sem_init(&block_sem, 0, 1);
+	flush_returned = false;
+
+	/* Block worker, then submit victim -- it stays QUEUED. */
+	k_work_submit(&blocker);
+	k_msleep(20);
+	k_work_submit(&flush_victim);
+	TEST_ASSERT_TRUE(k_work_busy_get(&flush_victim) & K_WORK_QUEUED);
+
+	/* Helper thread blocks on k_work_flush. */
+	k_thread_create(&flush_helper, flush_helper_stack,
+			K_THREAD_STACK_SIZEOF(flush_helper_stack), flush_helper_entry, NULL, NULL,
+			NULL, 5, 0, K_NO_WAIT);
+	k_msleep(50); /* let helper enter k_sem_take */
+	TEST_ASSERT_FALSE_MESSAGE(flush_returned, "flush returned before cancel -- bad test setup");
+
+	/* Cancel must release the flush waiter. */
+	TEST_ASSERT_TRUE(k_work_cancel(&flush_victim));
+	k_msleep(50);
+	TEST_ASSERT_TRUE_MESSAGE(flush_returned,
+				 "k_work_flush deadlocked: cancel didn't release sync waiter");
+
+	/* Cleanup: unblock worker, drain, abort helper. */
+	k_sem_give(&block_sem);
+	k_work_queue_drain(&k_sys_work_q, false);
+	k_thread_abort(&flush_helper);
+}
+
 void test_k_work_group(void)
 {
 	RUN_TEST(test_work_submit);
@@ -427,4 +480,5 @@ void test_k_work_group(void)
 	RUN_TEST(test_work_schedule_for_queue);
 	RUN_TEST(test_work_submit_cancel_race);
 	RUN_TEST(test_work_init_macro_static);
+	RUN_TEST(test_work_flush_unblocked_by_cancel);
 }
