@@ -85,34 +85,30 @@ static void test_sem_take_no_wait_empty(void)
 /* ----------------------------------------------------------------
  * K_SEM_DEFINE auto-init regression test.
  *
- * K_SEM_DEFINE must produce a fully-initialized semaphore before
- * main() runs (per Zephyr-compat contract). We verify this two ways:
- *   1. A separate constructor consumes the sem (k_sem_take/give); if
- *      K_SEM_DEFINE's auto-init didn't fire first, this would crash
- *      on a NULL handle. The flag captures success.
- *   2. The test reads the post-startup count to confirm it matches
- *      the macro's `initial` argument.
+ * K_SEM_DEFINE must produce a fully-initialized semaphore by the
+ * time app_main() runs. We verify the post-startup count matches
+ * the macro's `initial` argument and that take/give work without
+ * an explicit k_sem_init() call.
+ *
+ * Note: ESP-IDF Xtensa iterates .init_array in descending order, so
+ * we cannot reliably consume the sem from another constructor in
+ * the same TU (see K_SEM_DEFINE doxygen). The "ready by app_main"
+ * contract is what's actually deliverable; that's what we test.
  * ---------------------------------------------------------------- */
 
 K_SEM_DEFINE(auto_sem, 2, 5);
-static volatile bool auto_sem_used_pre_main = false;
-
-__attribute__((constructor)) static void consume_auto_sem(void)
-{
-	/* Take 2 (drains it), give 1, leaves count=1. Will SIGSEGV /
-	 * abort if K_SEM_DEFINE didn't auto-init the sem first. */
-	if (k_sem_take(&auto_sem, K_NO_WAIT) == 0 && k_sem_take(&auto_sem, K_NO_WAIT) == 0) {
-		k_sem_give(&auto_sem);
-		auto_sem_used_pre_main = true;
-	}
-}
 
 static void test_sem_auto_init_pre_main(void)
 {
-	TEST_ASSERT_TRUE_MESSAGE(auto_sem_used_pre_main,
-				 "K_SEM_DEFINE constructor did not run before main()");
-	/* Constructor left count=1 after take/take/give */
+	/* Initial count from the macro must be visible by app_main. */
+	TEST_ASSERT_EQUAL(2, k_sem_count_get(&auto_sem));
+
+	/* And the sem must be usable without an explicit k_sem_init(). */
+	TEST_ASSERT_EQUAL(0, k_sem_take(&auto_sem, K_NO_WAIT));
 	TEST_ASSERT_EQUAL(1, k_sem_count_get(&auto_sem));
+
+	k_sem_give(&auto_sem);
+	TEST_ASSERT_EQUAL(2, k_sem_count_get(&auto_sem));
 }
 
 void test_k_sem_group(void)

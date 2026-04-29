@@ -40,6 +40,11 @@
 extern "C" {
 #endif
 
+/* Upstream-compatible alias for the per-target stack element type. Lets
+ * code ported from Zephyr declare `k_thread_stack_t *stack` parameters
+ * verbatim. On Boreas this is FreeRTOS's StackType_t. */
+typedef StackType_t k_thread_stack_t;
+
 /* ----------------------------------------------------------------
  * Uptime
  * ---------------------------------------------------------------- */
@@ -138,28 +143,31 @@ struct k_sem {
  * Implementation note: FreeRTOS counting semaphores require a runtime
  * xSemaphoreCreateCountingStatic() call, so true compile-time init
  * isn't possible. The macro emits a per-instance constructor that
- * runs at startup (same pattern as k_sys_work_q auto-init in
- * components/zkernel/src/k_work.c). This means the sem is ready for
- * use from any other constructor or SYS_INIT-time code that runs
- * after this TU's constructors.
+ * runs at startup.
  *
- * Caveat 1 (archive stripping): when this macro expands inside an
- * object file that lives in a static archive, the constructor can
- * be stripped by the linker unless the archive is pulled in via
- * WHOLE_ARCHIVE (see idf_component_register WHOLE_ARCHIVE). User
- * application code typically isn't in such an archive, but library/
- * component code is -- pair with WHOLE_ARCHIVE there.
+ * @note ESP-IDF Xtensa caveat: ESP-IDF iterates `.init_array` in
+ *       DESCENDING order on Xtensa (see esp_system/startup.c
+ *       do_global_ctors). Default-priority user constructors run
+ *       BEFORE prioritized ones, and within a single TU the LAST-
+ *       declared constructor runs first. Adding a constructor
+ *       priority does not help -- prioritized constructors run
+ *       AFTER unprioritized ones in the descending iteration. As a
+ *       result the K_SEM_DEFINE'd sem is NOT guaranteed ready
+ *       inside arbitrary user constructors on ESP-IDF Xtensa. It IS
+ *       ready by:
+ *         - app_main()
+ *         - SYS_INIT() callbacks
+ *         - constructors declared earlier in the same TU
+ *           (textually) than the K_SEM_DEFINE
  *
- * Caveat 2 (cross-TU constructor ordering): GCC runs constructors
- * in declaration order within a single TU, but order ACROSS TUs is
- * unspecified. Code that consumes a K_SEM_DEFINE'd sem from a
- * constructor in a different TU may see a NULL handle. Either:
- *   (a) keep the K_SEM_DEFINE and its constructor consumer in the
- *       same TU, or
- *   (b) use explicit constructor priorities
- *       (__attribute__((constructor(N)))) to pin order, or
- *   (c) move the consumer to SYS_INIT() / app_main(), which run
- *       after all constructors.
+ *       For sems consumed from constructor context, prefer manual
+ *       k_sem_init() in a SYS_INIT callback.
+ *
+ * @note Archive-stripping: when this macro expands inside a static
+ *       archive, the constructor can be stripped by the linker
+ *       unless pulled in via WHOLE_ARCHIVE (idf_component_register
+ *       WHOLE_ARCHIVE). User application code typically isn't in
+ *       such an archive; library/component code is.
  */
 /* Indirection helpers so __LINE__ expands before token-pasting. The
  * line-number-based ctor name avoids generating a file-scope
@@ -315,10 +323,39 @@ void *k_timer_user_data_get(struct k_timer *timer);
 
 /* ----------------------------------------------------------------
  * Work Queue
+ *
+ * Backed by an intrusive sys_dlist_t of pending work items + a
+ * counting k_sem to wake the worker thread. Mutations are guarded
+ * by a per-queue spinlock (portMUX_TYPE), ISR-safe.
+ *
+ * k_work_cancel synchronously removes a queued item from the list
+ * (O(1) via sys_dlist_remove) -- matches upstream Zephyr's contract.
  * ---------------------------------------------------------------- */
 
 struct k_work;
+struct k_work_q;
 typedef void (*k_work_handler_t)(struct k_work *work);
+
+/* Work item flag bit indices. Mirror upstream Zephyr's bit ordering
+ * (zephyr/include/zephyr/kernel.h K_WORK_*_BIT enum) so that any
+ * code that serializes or compares against bit numbers is portable
+ * between Boreas and upstream. */
+enum {
+	K_WORK_RUNNING_BIT = 0,
+	K_WORK_CANCELING_BIT = 1,
+	K_WORK_QUEUED_BIT = 2,
+	K_WORK_DELAYED_BIT = 3,
+	K_WORK_FLUSHING_BIT = 4,
+};
+
+/* Work item flag masks. Inspect via k_work_busy_get().
+ * K_WORK_DELAYED and K_WORK_FLUSHING are defined for upstream parity
+ * but Boreas does not currently set them: */
+#define K_WORK_RUNNING   BIT(K_WORK_RUNNING_BIT)
+#define K_WORK_CANCELING BIT(K_WORK_CANCELING_BIT)
+#define K_WORK_QUEUED    BIT(K_WORK_QUEUED_BIT)
+#define K_WORK_DELAYED   BIT(K_WORK_DELAYED_BIT)
+#define K_WORK_FLUSHING  BIT(K_WORK_FLUSHING_BIT)
 
 struct k_work_sync {
 	struct k_sem sem;
@@ -326,79 +363,116 @@ struct k_work_sync {
 
 struct k_work {
 	k_work_handler_t handler;
-	sys_dnode_t node; /* queue linkage */
-	uint32_t flags;
+	sys_dnode_t node;         /* queue linkage */
+	uint32_t flags;           /* K_WORK_QUEUED | RUNNING | CANCELING | ... */
+	struct k_work_q *queue;   /* set while QUEUED, cleared on completion */
 	struct k_work_sync *sync; /* non-NULL when a flush is pending */
 };
 
-struct k_work_queue {
-	QueueHandle_t queue;
-	StaticQueue_t queue_buffer;
-	TaskHandle_t thread;
-	StaticTask_t tcb;
-	StackType_t *stack;
-	uint8_t *storage;
-	uint32_t depth;
-	uint32_t stack_size;
+/**
+ * Work queue configuration. Mirrors upstream Zephyr's
+ * struct k_work_queue_config.
+ *
+ * @param name       Thread name for diagnostics. May be NULL.
+ * @param no_yield   If true, the worker does not yield between work
+ *                   items. Lets a high-priority worker drain its
+ *                   queue without preemption, at the cost of
+ *                   responsiveness for equal-or-lower-priority work.
+ * @param essential  Currently ignored on Boreas; reserved for parity
+ *                   with upstream.
+ */
+struct k_work_queue_config {
 	const char *name;
+	bool no_yield;
+	bool essential;
 };
 
-#define K_WORK_DEFINE(name, _handler)                                                              \
-	struct k_work name = {                                                                     \
+struct k_work_q {
+	sys_dlist_t pending; /* head of pending k_work list */
+	struct k_sem sem;    /* counted: 1 per pending submit */
+	portMUX_TYPE lock;   /* protects `pending` mutations */
+	StaticTask_t tcb;
+	TaskHandle_t thread;
+	const char *name;
+	uint32_t flags; /* internal queue state, not user-visible */
+	bool no_yield;
+};
+
+/** Static initializer for an embedded struct k_work field. */
+#define K_WORK_INIT(_handler)                                                                      \
+	{                                                                                          \
 		.handler = (_handler),                                                             \
 	}
 
-/**
- * Statically define a work queue with its own storage.
- *
- * @param _name  Variable name for the work queue.
- * @param _depth Maximum number of pending work items.
- * @param _stack_size Stack size in bytes for the worker thread.
- */
-#define K_WORK_QUEUE_DEFINE(_name, _depth, _stack_size)                                            \
-	static uint8_t _k_wq_storage_##_name[(_depth) * sizeof(struct k_work *)];                  \
-	static StackType_t _k_wq_stack_##_name[(_stack_size) / sizeof(StackType_t)];               \
-	struct k_work_queue _name = {                                                              \
-		.storage = _k_wq_storage_##_name,                                                  \
-		.stack = _k_wq_stack_##_name,                                                      \
-		.depth = (_depth),                                                                 \
-		.stack_size = (_stack_size),                                                       \
-	}
+#define K_WORK_DEFINE(name, _handler) struct k_work name = K_WORK_INIT(_handler)
 
 void k_work_init(struct k_work *work, k_work_handler_t handler);
 int k_work_submit(struct k_work *work);
-int k_work_submit_to_queue(struct k_work_queue *queue, struct k_work *work);
+int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work);
 
 /**
  * Cancel a pending work item.
  *
- * Clears the QUEUED flag so the handler will not run. However, the item
- * cannot be removed from the underlying FreeRTOS queue -- it will be
- * dequeued and silently discarded by the worker thread. This means a
- * cancelled item still occupies a queue slot until it is drained.
+ * Synchronously removes the item from its queue's pending list (O(1)
+ * via sys_dlist_remove). Cannot cancel a work item that is currently
+ * running -- use k_work_cancel_sync() to wait for completion.
  *
- * Cannot cancel a work item that is currently running.
- *
- * @return true if cancelled, false if the item is currently running.
+ * @return true if the item was cancelled (or was not queued), false
+ *         if the item is currently running.
  */
 bool k_work_cancel(struct k_work *work);
 bool k_work_is_pending(struct k_work *work);
 int k_work_flush(struct k_work *work, struct k_work_sync *sync);
 int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync);
 
-void k_work_queue_init(struct k_work_queue *queue);
-void k_work_queue_start(struct k_work_queue *queue, const char *name, uint32_t stack_size,
-			int prio);
+/** Snapshot of work item flags. Returns a mask of K_WORK_RUNNING,
+ *  K_WORK_CANCELING, K_WORK_QUEUED, K_WORK_DELAYED, K_WORK_FLUSHING. */
+uint32_t k_work_busy_get(const struct k_work *work);
+
+/**
+ * Start a work queue thread.
+ *
+ * Mirrors upstream Zephyr signature. Caller provides the stack
+ * (typically via K_THREAD_STACK_DEFINE) and a config struct.
+ *
+ * @param queue       Queue object (zero-initialized struct k_work_q).
+ * @param stack       Stack buffer (typically K_THREAD_STACK_DEFINE).
+ * @param stack_size  Size of @p stack in bytes.
+ * @param prio        FreeRTOS priority.
+ * @param cfg         Optional configuration (name, no_yield, essential).
+ *                    May be NULL.
+ */
+void k_work_queue_start(struct k_work_q *queue, k_thread_stack_t *stack, size_t stack_size,
+			int prio, const struct k_work_queue_config *cfg);
+
+/**
+ * Block until all pending work on @p queue has completed.
+ *
+ * Submits a sentinel work item and waits for it to run, which
+ * guarantees every earlier item submitted *before* the drain call
+ * has finished.
+ *
+ * @param queue  Queue to drain.
+ * @param plug   Currently ignored on Boreas; reserved for upstream
+ *               parity. Upstream Zephyr blocks new submissions until
+ *               k_work_queue_unplug() is called; Boreas does not
+ *               implement plugging, so new submits during drain
+ *               race normally with the sentinel.
+ *
+ * @return 0 on success; negative errno on failure.
+ */
+int k_work_queue_drain(struct k_work_q *queue, bool plug);
 
 /**
  * System work queue.
  *
- * Auto-initialized before main() via constructor. Ready to use
- * from app_main(), SYS_INIT callbacks, and other constructors that
- * run after zkernel's constructor. k_work_queue_start() is idempotent,
- * so explicit init calls are safe but unnecessary.
+ * Auto-initialized before main() via constructor. Priority and stack
+ * size come from CONFIG_SYSTEM_WORKQUEUE_PRIORITY /
+ * CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE (Kconfig). Ready to use from
+ * app_main(), SYS_INIT callbacks, and other constructors that run
+ * after zkernel's constructor.
  */
-extern struct k_work_queue k_sys_work_q;
+extern struct k_work_q k_sys_work_q;
 
 /* ----------------------------------------------------------------
  * Delayable Work
@@ -407,7 +481,7 @@ extern struct k_work_queue k_sys_work_q;
 struct k_work_delayable {
 	struct k_work work;
 	struct k_timer timer;
-	struct k_work_queue *queue; /* target queue (NULL = system queue) */
+	struct k_work_q *queue; /* target queue (NULL = system queue) */
 };
 
 /* BEHAVIORAL DELTA: Unlike Zephyr, this macro does NOT produce a ready-to-use
@@ -421,7 +495,7 @@ struct k_work_delayable {
 
 void k_work_init_delayable(struct k_work_delayable *dwork, k_work_handler_t handler);
 int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay);
-int k_work_schedule_for_queue(struct k_work_queue *queue, struct k_work_delayable *dwork,
+int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 			      k_timeout_t delay);
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay);
 int k_work_cancel_delayable(struct k_work_delayable *dwork);
