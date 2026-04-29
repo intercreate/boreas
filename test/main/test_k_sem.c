@@ -101,8 +101,7 @@ __attribute__((constructor)) static void _consume_auto_sem(void)
 {
 	/* Take 2 (drains it), give 1, leaves count=1. Will SIGSEGV /
 	 * abort if K_SEM_DEFINE didn't auto-init the sem first. */
-	if (k_sem_take(&_auto_sem, K_NO_WAIT) == 0 &&
-	    k_sem_take(&_auto_sem, K_NO_WAIT) == 0) {
+	if (k_sem_take(&_auto_sem, K_NO_WAIT) == 0 && k_sem_take(&_auto_sem, K_NO_WAIT) == 0) {
 		k_sem_give(&_auto_sem);
 		_auto_sem_used_pre_main = true;
 	}

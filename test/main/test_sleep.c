@@ -82,6 +82,31 @@ static void test_usleep_ms_path(void)
 	TEST_ASSERT_LESS_OR_EQUAL(60, elapsed);
 }
 
+static void test_usleep_zero(void)
+{
+	/* Upstream Zephyr no-ops on us<=0 and returns 0. Verify Boreas
+	 * matches: must return promptly with no busy-wait. */
+	int64_t before = esp_timer_get_time();
+	int32_t rem = k_usleep(0);
+	int64_t elapsed_us = esp_timer_get_time() - before;
+
+	TEST_ASSERT_EQUAL(0, rem);
+	TEST_ASSERT_LESS_OR_EQUAL(100, elapsed_us);
+}
+
+static void test_usleep_negative(void)
+{
+	/* us<0: same no-op semantics as us==0. Notably must NOT pass a
+	 * negative value to esp_rom_delay_us (which takes uint32_t and
+	 * would treat -1 as a ~71-minute delay). */
+	int64_t before = esp_timer_get_time();
+	int32_t rem = k_usleep(-1);
+	int64_t elapsed_us = esp_timer_get_time() - before;
+
+	TEST_ASSERT_EQUAL(0, rem);
+	TEST_ASSERT_LESS_OR_EQUAL(100, elapsed_us);
+}
+
 void test_sleep_group(void)
 {
 	RUN_TEST(test_msleep);
@@ -91,4 +116,6 @@ void test_sleep_group(void)
 	RUN_TEST(test_sleep_returns_zero);
 	RUN_TEST(test_usleep_sub_ms);
 	RUN_TEST(test_usleep_ms_path);
+	RUN_TEST(test_usleep_zero);
+	RUN_TEST(test_usleep_negative);
 }
