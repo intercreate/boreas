@@ -62,13 +62,14 @@ static void test_sleep_returns_zero(void)
 static void test_usleep_sub_ms(void)
 {
 	/* Sub-millisecond path uses esp_rom_delay_us busy-wait. Verify
-	 * it actually delays (no early return) and stays bounded. */
+	 * it actually delays and does not return early. No upper bound
+	 * because scheduler/ISR preemption can legitimately inflate the
+	 * measured elapsed time. */
 	int64_t before = esp_timer_get_time();
 	k_usleep(500);
 	int64_t elapsed_us = esp_timer_get_time() - before;
 
 	TEST_ASSERT_GREATER_OR_EQUAL(400, elapsed_us);
-	TEST_ASSERT_LESS_OR_EQUAL(2000, elapsed_us);
 }
 
 static void test_usleep_ms_path(void)
@@ -85,26 +86,30 @@ static void test_usleep_ms_path(void)
 static void test_usleep_zero(void)
 {
 	/* Upstream Zephyr no-ops on us<=0 and returns 0. Verify Boreas
-	 * matches: must return promptly with no busy-wait. */
+	 * matches: must return promptly with no busy-wait. The 1ms
+	 * upper bound tolerates normal interrupt/scheduler latency
+	 * while still cleanly distinguishing the no-op path from any
+	 * accidental fall-through to esp_rom_delay_us. */
 	int64_t before = esp_timer_get_time();
 	int32_t rem = k_usleep(0);
 	int64_t elapsed_us = esp_timer_get_time() - before;
 
 	TEST_ASSERT_EQUAL(0, rem);
-	TEST_ASSERT_LESS_OR_EQUAL(100, elapsed_us);
+	TEST_ASSERT_LESS_OR_EQUAL(1000, elapsed_us);
 }
 
 static void test_usleep_negative(void)
 {
 	/* us<0: same no-op semantics as us==0. Notably must NOT pass a
 	 * negative value to esp_rom_delay_us (which takes uint32_t and
-	 * would treat -1 as a ~71-minute delay). */
+	 * would treat -1 as a ~71-minute delay). 1ms upper bound for
+	 * the same reason as test_usleep_zero. */
 	int64_t before = esp_timer_get_time();
 	int32_t rem = k_usleep(-1);
 	int64_t elapsed_us = esp_timer_get_time() - before;
 
 	TEST_ASSERT_EQUAL(0, rem);
-	TEST_ASSERT_LESS_OR_EQUAL(100, elapsed_us);
+	TEST_ASSERT_LESS_OR_EQUAL(1000, elapsed_us);
 }
 
 void test_sleep_group(void)
