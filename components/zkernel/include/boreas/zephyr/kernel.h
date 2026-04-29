@@ -143,12 +143,23 @@ struct k_sem {
  * use from any other constructor or SYS_INIT-time code that runs
  * after this TU's constructors.
  *
- * Caveat: when this macro expands inside an object file that lives
- * in a static archive, the constructor can be stripped by the
- * linker unless the archive is pulled in via WHOLE_ARCHIVE (see
- * idf_component_register WHOLE_ARCHIVE). User application code
- * typically isn't in such an archive, but library/component code
- * is — pair with WHOLE_ARCHIVE there.
+ * Caveat 1 (archive stripping): when this macro expands inside an
+ * object file that lives in a static archive, the constructor can
+ * be stripped by the linker unless the archive is pulled in via
+ * WHOLE_ARCHIVE (see idf_component_register WHOLE_ARCHIVE). User
+ * application code typically isn't in such an archive, but library/
+ * component code is -- pair with WHOLE_ARCHIVE there.
+ *
+ * Caveat 2 (cross-TU constructor ordering): GCC runs constructors
+ * in declaration order within a single TU, but order ACROSS TUs is
+ * unspecified. Code that consumes a K_SEM_DEFINE'd sem from a
+ * constructor in a different TU may see a NULL handle. Either:
+ *   (a) keep the K_SEM_DEFINE and its constructor consumer in the
+ *       same TU, or
+ *   (b) use explicit constructor priorities
+ *       (__attribute__((constructor(N)))) to pin order, or
+ *   (c) move the consumer to SYS_INIT() / app_main(), which run
+ *       after all constructors.
  */
 #define K_SEM_DEFINE(name, _initial, _limit)                                                       \
 	struct k_sem name = {0};                                                                   \
@@ -449,9 +460,10 @@ typedef TaskHandle_t k_tid_t;
 
 /**
  * Create and start (or defer start of) a thread. Returns the thread
- * ID on success, or NULL on failure (e.g. xTaskCreateStatic returned
- * NULL). Matches upstream Zephyr's return type so the common
- * `tid = k_thread_create(...)` chain compiles cleanly.
+ * ID. Matches upstream Zephyr's return type and "always returns a
+ * valid tid" contract: failure of the underlying xTaskCreateStatic
+ * (only possible on programmer error -- misaligned stack, etc.)
+ * triggers __ASSERT rather than returning NULL.
  */
 k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
 			k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
