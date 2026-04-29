@@ -161,9 +161,19 @@ struct k_sem {
  *   (c) move the consumer to SYS_INIT() / app_main(), which run
  *       after all constructors.
  */
+/* Indirection helpers so __LINE__ expands before token-pasting. The
+ * line-number-based ctor name avoids generating a file-scope
+ * identifier that begins with underscore (reserved by C11 7.1.3) and
+ * is robust to caller-supplied names that themselves begin with
+ * underscore. Caveat: two K_SEM_DEFINE on the same source line will
+ * collide; not expected in practice. */
+#define K_SEM_CONCAT_(a, b)        a##b
+#define K_SEM_CONCAT(a, b)         K_SEM_CONCAT_(a, b)
+#define K_SEM_INIT_CTOR_NAME(line) K_SEM_CONCAT(k_sem_init_ctor_, line)
+
 #define K_SEM_DEFINE(name, _initial, _limit)                                                       \
 	struct k_sem name = {0};                                                                   \
-	__attribute__((constructor)) static void _k_sem_init_##name(void)                          \
+	__attribute__((constructor)) static void K_SEM_INIT_CTOR_NAME(__LINE__)(void)              \
 	{                                                                                          \
 		k_sem_init(&name, (_initial), (_limit));                                           \
 	}
