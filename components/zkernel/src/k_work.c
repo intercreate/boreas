@@ -1,33 +1,57 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Intercreate
+ *
+ * k_work backed by sys_dlist_t + counting k_sem (no FreeRTOS xQueue).
+ * Cancel is O(1) actually-removable via sys_dlist_remove.
  */
 
 #include "zephyr/kernel.h"
+#include "sdkconfig.h"
 
 #include <errno.h>
 
-#include "esp_log.h"
+/* Internal queue flag (k_work_q.flags). Not exposed in the public
+ * header because it's an implementation detail. */
+#define Z_WORK_QUEUE_STARTED BIT(0)
 
-static const char *TAG = "k_work";
+/* ----------------------------------------------------------------
+ * System Work Queue
+ *
+ * Stack lives outside the queue struct (matches upstream pattern).
+ * Auto-initialized before main() via constructor.
+ * ---------------------------------------------------------------- */
 
-/* Work item flags */
-#define K_WORK_QUEUED  BIT(0)
-#define K_WORK_RUNNING BIT(1)
+#ifndef CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE
+#define CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE 4096
+#endif
+#ifndef CONFIG_SYSTEM_WORKQUEUE_PRIORITY
+#define CONFIG_SYSTEM_WORKQUEUE_PRIORITY 5
+#endif
 
-/* Default system work queue */
-#define SYS_WQ_DEPTH      16
-#define SYS_WQ_STACK_SIZE 4096
-static uint8_t sys_wq_storage[SYS_WQ_DEPTH * sizeof(struct k_work *)];
-static StackType_t sys_wq_stack[SYS_WQ_STACK_SIZE / sizeof(StackType_t)];
+static StackType_t sys_wq_stack[CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE / sizeof(StackType_t)];
+struct k_work_q k_sys_work_q;
 
-struct k_work_queue k_sys_work_q = {
-	.storage = sys_wq_storage,
-	.stack = sys_wq_stack,
-	.depth = SYS_WQ_DEPTH,
-	.stack_size = SYS_WQ_STACK_SIZE,
-};
-static bool sys_wq_initialized = false;
+/* Branch-once helpers around portENTER/EXIT_CRITICAL: ESP-IDF needs
+ * different macros for ISR vs task context. Inlined to avoid runtime
+ * overhead in the common (task) case. */
+static inline void z_work_lock(struct k_work_q *queue)
+{
+	if (xPortInIsrContext()) {
+		portENTER_CRITICAL_ISR(&queue->lock);
+	} else {
+		portENTER_CRITICAL(&queue->lock);
+	}
+}
+
+static inline void z_work_unlock(struct k_work_q *queue)
+{
+	if (xPortInIsrContext()) {
+		portEXIT_CRITICAL_ISR(&queue->lock);
+	} else {
+		portEXIT_CRITICAL(&queue->lock);
+	}
+}
 
 /* ----------------------------------------------------------------
  * Work Queue Thread
@@ -35,28 +59,41 @@ static bool sys_wq_initialized = false;
 
 static void k_work_queue_thread(void *p1)
 {
-	struct k_work_queue *queue = (struct k_work_queue *)p1;
-	struct k_work *work;
+	struct k_work_q *queue = (struct k_work_q *)p1;
 
 	for (;;) {
-		if (xQueueReceive(queue->queue, &work, portMAX_DELAY) == pdTRUE) {
-			/* A cancelled item may still be in the queue (QUEUED flag cleared
-			 * but not removable from FreeRTOS queue). Skip it silently. */
-			if (work && work->handler &&
-			    (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_QUEUED)) {
-				__atomic_or_fetch(&work->flags, K_WORK_RUNNING, __ATOMIC_RELAXED);
-				__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
-				work->handler(work);
-				__atomic_and_fetch(&work->flags, ~K_WORK_RUNNING, __ATOMIC_RELAXED);
+		k_sem_take(&queue->sem, K_FOREVER);
 
-				/* Signal any flush waiter */
-				struct k_work_sync *sync =
-					__atomic_load_n(&work->sync, __ATOMIC_ACQUIRE);
-				if (sync) {
-					__atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
-					k_sem_give(&sync->sem);
-				}
-			}
+		/* Pop one item under lock. Spurious wakeups (cancelled item
+		 * gave the sem before being removed) yield NULL -- just loop. */
+		struct k_work *work = NULL;
+		portENTER_CRITICAL(&queue->lock);
+		sys_dnode_t *node = sys_dlist_get(&queue->pending);
+		if (node != NULL) {
+			work = CONTAINER_OF(node, struct k_work, node);
+			__atomic_or_fetch(&work->flags, K_WORK_RUNNING, __ATOMIC_RELAXED);
+			__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
+			__atomic_store_n(&work->queue, NULL, __ATOMIC_RELEASE);
+		}
+		portEXIT_CRITICAL(&queue->lock);
+
+		if (work == NULL || work->handler == NULL) {
+			continue;
+		}
+
+		work->handler(work);
+
+		__atomic_and_fetch(&work->flags, ~K_WORK_RUNNING, __ATOMIC_RELAXED);
+
+		/* Signal any flush/cancel_sync waiter */
+		struct k_work_sync *sync = __atomic_load_n(&work->sync, __ATOMIC_ACQUIRE);
+		if (sync) {
+			__atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
+			k_sem_give(&sync->sem);
+		}
+
+		if (!queue->no_yield) {
+			taskYIELD();
 		}
 	}
 }
@@ -69,50 +106,46 @@ void k_work_init(struct k_work *work, k_work_handler_t handler)
 {
 	work->handler = handler;
 	work->flags = 0;
+	work->queue = NULL;
 	work->sync = NULL;
 	work->node.next = NULL;
 	work->node.prev = NULL;
 }
 
-static int k_work_submit_internal(struct k_work_queue *queue, struct k_work *work)
+static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
 {
+	z_work_lock(queue);
+
 	if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_QUEUED) {
 		/* Already queued -- idempotent */
+		z_work_unlock(queue);
 		return 1;
 	}
 
 	__atomic_or_fetch(&work->flags, K_WORK_QUEUED, __ATOMIC_RELAXED);
+	__atomic_store_n(&work->queue, queue, __ATOMIC_RELEASE);
+	sys_dlist_append(&queue->pending, &work->node);
 
-	BaseType_t ret;
-	if (xPortInIsrContext()) {
-		BaseType_t wake = pdFALSE;
-		ret = xQueueSendToBackFromISR(queue->queue, &work, &wake);
-		if (wake) {
-			portYIELD_FROM_ISR(wake);
-		}
-	} else {
-		ret = xQueueSendToBack(queue->queue, &work, 0);
-	}
+	z_work_unlock(queue);
 
-	if (ret != pdTRUE) {
-		__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
-		ESP_LOGW(TAG, "Work queue full");
-		return -ENOSPC;
-	}
+	/* k_sem_give is already ISR-safe (uses xSemaphoreGiveFromISR). */
+	k_sem_give(&queue->sem);
 	return 0;
 }
 
 int k_work_submit(struct k_work *work)
 {
-	if (!sys_wq_initialized) {
-		ESP_LOGE(TAG, "System work queue not initialized");
+	if (!(__atomic_load_n(&k_sys_work_q.flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
 		return -EINVAL;
 	}
 	return k_work_submit_internal(&k_sys_work_q, work);
 }
 
-int k_work_submit_to_queue(struct k_work_queue *queue, struct k_work *work)
+int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work)
 {
+	if (!(__atomic_load_n(&queue->flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
+		return -EINVAL;
+	}
 	return k_work_submit_internal(queue, work);
 }
 
@@ -121,7 +154,51 @@ bool k_work_cancel(struct k_work *work)
 	if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_RUNNING) {
 		return false; /* Can't cancel while running */
 	}
-	__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
+
+	struct k_work_q *queue = __atomic_load_n(&work->queue, __ATOMIC_ACQUIRE);
+	if (queue == NULL) {
+		/* Not queued -- idempotent success */
+		return true;
+	}
+
+	struct k_work_sync *sync_to_release = NULL;
+
+	z_work_lock(queue);
+
+	/* Re-validate the queue under lock: between our read of work->queue
+	 * and acquiring this queue's lock, the worker may have popped the
+	 * item AND another thread may have re-submitted it to a *different*
+	 * queue. We hold the wrong lock for that case; bail rather than
+	 * remove from a list we don't own. Cancel is best-effort. */
+	if (__atomic_load_n(&work->queue, __ATOMIC_RELAXED) != queue) {
+		z_work_unlock(queue);
+		return true;
+	}
+
+	if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_QUEUED) {
+		sys_dlist_remove(&work->node);
+		__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
+		__atomic_store_n(&work->queue, NULL, __ATOMIC_RELEASE);
+
+		/* If a flush waiter (k_work_flush / k_work_cancel_sync) is
+		 * attached, release it here -- the cancelled item will never
+		 * run to completion on a worker thread, so the worker won't
+		 * give the sem. Atomic exchange so only one path consumes it
+		 * (defensive against a concurrent worker giving for a stale
+		 * sync pointer). k_sem_give itself is hoisted outside the
+		 * critical section to avoid calling FreeRTOS API from
+		 * portENTER_CRITICAL. */
+		sync_to_release = __atomic_exchange_n(&work->sync, NULL, __ATOMIC_ACQ_REL);
+	}
+
+	z_work_unlock(queue);
+
+	if (sync_to_release != NULL) {
+		k_sem_give(&sync_to_release->sem);
+	}
+
+	/* The sem give that submit issued for this item will cause one
+	 * spurious worker wakeup; it pops a NULL and loops. Harmless. */
 	return true;
 }
 
@@ -131,38 +208,43 @@ bool k_work_is_pending(struct k_work *work)
 		(K_WORK_QUEUED | K_WORK_RUNNING)) != 0;
 }
 
+uint32_t k_work_busy_get(const struct k_work *work)
+{
+	return __atomic_load_n(&work->flags, __ATOMIC_RELAXED);
+}
+
 int k_work_flush(struct k_work *work, struct k_work_sync *sync)
 {
-	/* Set up sync BEFORE checking state to avoid TOCTOU race:
-	 * if work finishes between our check and sem_take, the worker
-	 * thread will have already signaled the semaphore. */
+	/* Set up sync BEFORE checking state to avoid TOCTOU: if work
+	 * finishes between check and sem_take, the worker will have
+	 * already signaled the sem. */
 	k_sem_init(&sync->sem, 0, 1);
 	__atomic_store_n(&work->sync, sync, __ATOMIC_RELEASE);
 
 	if (!k_work_is_pending(work)) {
 		__atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
-		return 0; /* Nothing to flush */
+		return 0;
 	}
 
-	/* Block until the worker thread signals completion */
 	return k_sem_take(&sync->sem, K_FOREVER);
 }
 
 int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync)
 {
-	/* Set up sync BEFORE cancelling to avoid TOCTOU race */
 	k_sem_init(&sync->sem, 0, 1);
 	__atomic_store_n(&work->sync, sync, __ATOMIC_RELEASE);
+	__atomic_or_fetch(&work->flags, K_WORK_CANCELING, __ATOMIC_RELAXED);
 
-	/* Try to cancel (clears QUEUED flag) */
 	k_work_cancel(work);
 
-	/* If it was running when we cancelled, wait for it to finish */
 	if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_RUNNING) {
-		return k_sem_take(&sync->sem, K_FOREVER);
+		int ret = k_sem_take(&sync->sem, K_FOREVER);
+		__atomic_and_fetch(&work->flags, ~K_WORK_CANCELING, __ATOMIC_RELAXED);
+		return ret;
 	}
 
 	__atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
+	__atomic_and_fetch(&work->flags, ~K_WORK_CANCELING, __ATOMIC_RELAXED);
 	return 0;
 }
 
@@ -170,46 +252,74 @@ int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync)
  * Work Queue Lifecycle
  * ---------------------------------------------------------------- */
 
-void k_work_queue_init(struct k_work_queue *queue)
-{
-	queue->queue = NULL;
-	queue->thread = NULL;
-	queue->name = NULL;
-	/* storage, stack, depth, stack_size, tcb are set by K_WORK_QUEUE_DEFINE
-	 * or by the caller before k_work_queue_start */
-}
-
-void k_work_queue_start(struct k_work_queue *queue, const char *name, uint32_t stack_size, int prio)
+void k_work_queue_start(struct k_work_q *queue, k_thread_stack_t *stack, size_t stack_size,
+			int prio, const struct k_work_queue_config *cfg)
 {
 	/* Idempotent: no-op if already started */
-	if (queue->queue != NULL) {
+	if (__atomic_load_n(&queue->flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED) {
 		return;
 	}
 
-	queue->name = name;
+	sys_dlist_init(&queue->pending);
+	k_sem_init(&queue->sem, 0, INT32_MAX);
+	queue->lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
+	queue->name = cfg ? cfg->name : NULL;
+	queue->no_yield = cfg ? cfg->no_yield : false;
 
-	/* Create queue for work item pointers */
-	queue->queue = xQueueCreateStatic(queue->depth, sizeof(struct k_work *), queue->storage,
-					  &queue->queue_buffer);
+	queue->thread = xTaskCreateStatic(
+		k_work_queue_thread, queue->name ? queue->name : "k_work_q",
+		stack_size / sizeof(StackType_t), queue, prio, stack, &queue->tcb);
+	__ASSERT(queue->thread != NULL, "k_work_queue_start: xTaskCreateStatic failed");
 
-	/* Create worker thread using the queue's own stack and TCB */
-	queue->thread =
-		xTaskCreateStatic(k_work_queue_thread, name, stack_size / sizeof(StackType_t),
-				  queue, prio, queue->stack, &queue->tcb);
+	__atomic_or_fetch(&queue->flags, Z_WORK_QUEUE_STARTED, __ATOMIC_RELEASE);
+}
 
-	if (queue == &k_sys_work_q) {
-		sys_wq_initialized = true;
+/* ----------------------------------------------------------------
+ * Drain
+ * ---------------------------------------------------------------- */
+
+struct z_work_drain_sentinel {
+	struct k_work work;
+	struct k_sem sem;
+};
+
+static void z_work_drain_handler(struct k_work *work)
+{
+	struct z_work_drain_sentinel *s = CONTAINER_OF(work, struct z_work_drain_sentinel, work);
+	k_sem_give(&s->sem);
+}
+
+int k_work_queue_drain(struct k_work_q *queue, bool plug)
+{
+	(void)plug; /* Boreas does not implement plugging; reserved for upstream parity. */
+
+	/* Sentinel is stack-allocated -- safe because xSemaphoreGive does
+	 * not access the sem after returning, so by the time k_sem_take
+	 * wakes the drain caller, the worker is finished with `s`. */
+	struct z_work_drain_sentinel s;
+	k_work_init(&s.work, z_work_drain_handler);
+	k_sem_init(&s.sem, 0, 1);
+
+	int ret = k_work_submit_to_queue(queue, &s.work);
+	if (ret < 0) {
+		return ret;
 	}
-
-	ESP_LOGI(TAG, "Work queue '%s' started (prio=%d, stack=%lu)", name, prio,
-		 (unsigned long)stack_size);
+	return k_sem_take(&s.sem, K_FOREVER);
 }
 
 /* Auto-initialize the system work queue before main() */
-static void __attribute__((constructor)) _sys_work_q_auto_init(void)
+static void __attribute__((constructor)) sys_work_q_auto_init(void)
 {
-	k_work_queue_init(&k_sys_work_q);
-	k_work_queue_start(&k_sys_work_q, "sys_wq", SYS_WQ_STACK_SIZE, 5);
+	static const struct k_work_queue_config sys_cfg = {
+		.name = "sys_wq",
+#ifdef CONFIG_SYSTEM_WORKQUEUE_NO_YIELD
+		.no_yield = true,
+#else
+		.no_yield = false,
+#endif
+	};
+	k_work_queue_start(&k_sys_work_q, sys_wq_stack, sizeof(sys_wq_stack),
+			   CONFIG_SYSTEM_WORKQUEUE_PRIORITY, &sys_cfg);
 }
 
 /* ----------------------------------------------------------------
@@ -238,7 +348,7 @@ int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay)
 	return k_work_schedule_for_queue(&k_sys_work_q, dwork, delay);
 }
 
-int k_work_schedule_for_queue(struct k_work_queue *queue, struct k_work_delayable *dwork,
+int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 			      k_timeout_t delay)
 {
 	if (k_work_is_pending(&dwork->work)) {

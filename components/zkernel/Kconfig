@@ -37,6 +37,32 @@ menu "Boreas Kernel (zkernel)"
         help
             Maximum number of components that can register via SYS_INIT.
 
+    config SYSTEM_WORKQUEUE_PRIORITY
+        int "System workqueue thread priority"
+        default 5
+        help
+            FreeRTOS task priority for the auto-initialized system
+            workqueue (k_sys_work_q). Higher number = higher priority.
+            Mirrors upstream Zephyr's CONFIG_SYSTEM_WORKQUEUE_PRIORITY.
+
+    config SYSTEM_WORKQUEUE_STACK_SIZE
+        int "System workqueue thread stack size (bytes)"
+        default 4096
+        help
+            Stack size for the auto-initialized system workqueue
+            (k_sys_work_q) worker thread. Mirrors upstream Zephyr's
+            CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE.
+
+    config SYSTEM_WORKQUEUE_NO_YIELD
+        bool "System workqueue: do not yield between work items"
+        default n
+        help
+            When enabled, the system workqueue worker does not yield
+            between handler invocations. Lets a high-priority worker
+            drain its queue without preemption, at the cost of
+            responsiveness for equal-or-lower-priority work. Mirrors
+            upstream Zephyr's CONFIG_SYSTEM_WORKQUEUE_NO_YIELD.
+
     config ZKERNEL_FATAL_CAPTURE
         bool "Capture fatal error context to NVS"
         default n
