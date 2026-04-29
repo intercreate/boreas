@@ -33,10 +33,12 @@ static void test_thread_create_and_run(void)
 	struct k_thread thread = {0};
 	thread_ran = 0;
 
-	k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack), thread_entry,
-			(void *)&thread_ran, NULL, NULL, 5, 0, K_NO_WAIT);
+	k_tid_t tid = k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack), thread_entry,
+				      (void *)&thread_ran, NULL, NULL, 5, 0, K_NO_WAIT);
 
-	TEST_ASSERT_NOT_NULL(thread.handle);
+	/* Zephyr-compat: returned tid matches the thread's handle. */
+	TEST_ASSERT_NOT_NULL(tid);
+	TEST_ASSERT_EQUAL_PTR(thread.handle, tid);
 
 	k_msleep(100);
 	TEST_ASSERT_EQUAL(42, thread_ran);

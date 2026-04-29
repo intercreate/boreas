@@ -30,9 +30,14 @@ static inline atomic_val_t atomic_get(const atomic_t *target)
 	return __atomic_load_n(target, __ATOMIC_SEQ_CST);
 }
 
-static inline void atomic_set(atomic_t *target, atomic_val_t value)
+/**
+ * Atomically set @p target to @p value and return the previous value.
+ * Matches upstream Zephyr's atomic_set(): the return value enables
+ * atomic-swap idioms (e.g. `old = atomic_set(&x, new);`).
+ */
+static inline atomic_val_t atomic_set(atomic_t *target, atomic_val_t value)
 {
-	__atomic_store_n(target, value, __ATOMIC_SEQ_CST);
+	return __atomic_exchange_n(target, value, __ATOMIC_SEQ_CST);
 }
 
 static inline atomic_val_t atomic_or(atomic_t *target, atomic_val_t value)
