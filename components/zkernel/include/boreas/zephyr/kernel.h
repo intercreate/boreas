@@ -68,6 +68,26 @@ static inline uint32_t k_uptime_get_32(void)
 }
 
 /**
+ * @brief Get system uptime in FreeRTOS-tick-period units, derived from
+ *        the esp_timer microsecond clock. Mirrors upstream Zephyr's
+ *        k_uptime_ticks().
+ *
+ * @return Tick count since boot, as k_ticks_t.
+ *
+ * @note Boreas implementation derives this from esp_timer (the same
+ *       clock domain as k_uptime_get and k_timer_expires_ticks), NOT
+ *       from xTaskGetTickCount. This keeps all "uptime"-flavored APIs
+ *       in a single clock domain and makes
+ *       `k_uptime_ticks() * portTICK_PERIOD_MS ~= k_uptime_get()`.
+ *       Code that genuinely wants the FreeRTOS scheduler tick counter
+ *       should call xTaskGetTickCount() directly.
+ */
+static inline k_ticks_t k_uptime_ticks(void)
+{
+	return (k_ticks_t)(esp_timer_get_time() / ((int64_t)portTICK_PERIOD_MS * 1000));
+}
+
+/**
  * Compute delta since *reftime, update *reftime to now.
  * Overflow-safe.
  */
@@ -373,9 +393,9 @@ k_ticks_t k_timer_remaining_ticks(const struct k_timer *timer);
  *         contract.
  *
  * @warning When the timer is stopped, this returns the CURRENT uptime --
- *          NOT zero. Callers checking for "no expiry pending" must use
- *          k_timer_remaining_ticks() (which returns 0) or the running
- *          state via k_timer_status_get().
+ *          NOT zero. Callers checking for "no expiry pending" should use
+ *          k_timer_remaining_ticks(), which returns 0 if the timer is
+ *          stopped or has already expired.
  */
 k_ticks_t k_timer_expires_ticks(const struct k_timer *timer);
 
