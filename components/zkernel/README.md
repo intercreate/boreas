@@ -108,7 +108,10 @@ k_timer_init(&timer, my_expiry, my_stop);
 k_timer_start(&timer, K_MSEC(100), K_MSEC(1000));  // first=100ms, period=1s
 k_timer_stop(&timer);
 k_timer_status_get(&timer);     // expiry count since last read (atomic)
+k_timer_status_sync(&timer);    // block until next expiry or stop, then return count
 k_timer_remaining_get(&timer);  // ms until next expiry
+k_timer_remaining_ticks(&timer); // FreeRTOS ticks until next expiry
+k_timer_expires_ticks(&timer);  // absolute uptime ticks of next expiry
 k_timer_user_data_set(&timer, ptr);
 ```
 
