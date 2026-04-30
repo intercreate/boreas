@@ -19,6 +19,10 @@ typedef struct {
 	int64_t us; /* microseconds; -1 = forever; 0 = no wait */
 } k_timeout_t;
 
+/** Tick-count type, mirrors upstream Zephyr's <zephyr/sys/time_units.h>.
+ *  Used for absolute and relative tick-resolution timer queries. */
+typedef int64_t k_ticks_t;
+
 #define K_USEC(usec) ((k_timeout_t){.us = (usec)})
 #define K_MSEC(msec) ((k_timeout_t){.us = (int64_t)(msec) * 1000})
 #define K_SECONDS(s) ((k_timeout_t){.us = (int64_t)(s) * 1000000})
