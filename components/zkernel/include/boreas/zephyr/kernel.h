@@ -68,6 +68,26 @@ static inline uint32_t k_uptime_get_32(void)
 }
 
 /**
+ * @brief Get system uptime in FreeRTOS-tick-period units, derived from
+ *        the esp_timer microsecond clock. Mirrors upstream Zephyr's
+ *        k_uptime_ticks().
+ *
+ * @return Tick count since boot, as k_ticks_t.
+ *
+ * @note Boreas implementation derives this from esp_timer (the same
+ *       clock domain as k_uptime_get and k_timer_expires_ticks), NOT
+ *       from xTaskGetTickCount. This keeps all "uptime"-flavored APIs
+ *       in a single clock domain and makes
+ *       `k_uptime_ticks() * portTICK_PERIOD_MS ~= k_uptime_get()`.
+ *       Code that genuinely wants the FreeRTOS scheduler tick counter
+ *       should call xTaskGetTickCount() directly.
+ */
+static inline k_ticks_t k_uptime_ticks(void)
+{
+	return (k_ticks_t)(esp_timer_get_time() / ((int64_t)portTICK_PERIOD_MS * 1000));
+}
+
+/**
  * Compute delta since *reftime, update *reftime to now.
  * Overflow-safe.
  */
@@ -275,15 +295,35 @@ uint32_t k_event_wait_all(struct k_event *event, uint32_t events, bool reset, k_
 
 /* ----------------------------------------------------------------
  * Timer (over esp_timer)
- *
- * BEHAVIORAL DELTA: Timer expiry callbacks run in the ESP_TIMER_TASK
- * context (a normal FreeRTOS task), not in ISR context as in Zephyr.
- * This means callbacks CAN call blocking APIs, but they ARE
- * preemptible by higher-priority tasks.
  * ---------------------------------------------------------------- */
 
 struct k_timer;
+
+/**
+ * Timer expiry function type.
+ *
+ * @warning Callback context divergence from upstream Zephyr.
+ *          Upstream Zephyr documents this callback as running in
+ *          "system clock interrupt handler" context. Boreas dispatches
+ *          via esp_timer with ESP_TIMER_TASK, which is a normal
+ *          FreeRTOS task -- NOT an ISR. Practical consequences:
+ *            - Blocking calls (k_sem_take, k_mutex_lock, k_msleep) are
+ *              permitted from this callback. Upstream forbids them.
+ *            - There is no K_ISR_LOCK-equivalent guarantee. The
+ *              callback IS preemptible by higher-priority tasks.
+ *            - Code ported from upstream that assumes ISR semantics
+ *              (e.g. relying on irq_lock for atomicity vs. user code)
+ *              must be reviewed.
+ *
+ *          Code that needs both behaviors should not assume either --
+ *          use k_sem / k_mutex for synchronization regardless.
+ */
 typedef void (*k_timer_expiry_t)(struct k_timer *timer);
+
+/**
+ * Timer stop function type. Runs in the context of the caller of
+ * k_timer_stop() (typically a normal task on Boreas).
+ */
 typedef void (*k_timer_stop_t)(struct k_timer *timer);
 
 struct k_timer {
@@ -293,6 +333,7 @@ struct k_timer {
 	void *user_data;
 	uint32_t status; /* expiry count since last status read */
 	bool running;
+	bool is_periodic;            /* last k_timer_start was periodic; one-shot if false */
 	bool first_interval_pending; /* start-once then switch to periodic */
 	uint64_t period_us;          /* stored for deferred periodic start */
 };
@@ -311,13 +352,54 @@ void k_timer_stop(struct k_timer *timer);
  *  Non-blocking. Returns 0 if no expirations since last call. */
 uint32_t k_timer_status_get(struct k_timer *timer);
 
-/** Block until the timer next expires, then return and reset the count.
- *  Returns 0 immediately if the timer is stopped. */
+/**
+ * Block until the timer's expiry count is non-zero, or the timer is
+ * stopped. Returns the count and resets it to zero atomically.
+ *
+ * Returns immediately if the count is already non-zero, or if the
+ * timer is already stopped.
+ *
+ * @note Must not be called from an interrupt handler (blocks).
+ *
+ * @note Boreas implementation polls every k_msleep(1). Upstream
+ *       Zephyr blocks the calling thread on a wait queue. Same
+ *       caller-visible semantics; the wake granularity here is
+ *       bounded by the FreeRTOS tick period (portTICK_PERIOD_MS,
+ *       set by CONFIG_FREERTOS_HZ -- 1ms at the Boreas default of
+ *       1000 Hz, 10ms at the ESP-IDF Kconfig default of 100 Hz).
+ *       A wake can therefore be up to one tick period late.
+ */
 uint32_t k_timer_status_sync(struct k_timer *timer);
 
 /** Time remaining until the next expiry, in milliseconds. Returns 0
  *  if the timer is stopped or has already expired. */
 uint32_t k_timer_remaining_get(struct k_timer *timer);
+
+/**
+ * @brief Get time remaining before the next timer expiry, in FreeRTOS ticks.
+ *
+ * @param timer The timer to query.
+ * @return Remaining ticks until the next expiry, or 0 if the timer is
+ *         stopped or has already expired.
+ */
+k_ticks_t k_timer_remaining_ticks(const struct k_timer *timer);
+
+/**
+ * @brief Get the absolute uptime (in FreeRTOS ticks since boot) at which
+ *        the timer will next expire.
+ *
+ * @param timer The timer to query.
+ * @return Absolute tick count of the next expiry, or the current uptime
+ *         in ticks if the timer is not running. Matches upstream Zephyr's
+ *         contract.
+ *
+ * @warning When the timer is stopped, this returns the CURRENT uptime --
+ *          NOT zero. Callers checking for "no expiry pending" should use
+ *          k_timer_remaining_ticks(), which returns 0 if the timer is
+ *          stopped or has already expired.
+ */
+k_ticks_t k_timer_expires_ticks(const struct k_timer *timer);
+
 void k_timer_user_data_set(struct k_timer *timer, void *user_data);
 void *k_timer_user_data_get(struct k_timer *timer);
 
