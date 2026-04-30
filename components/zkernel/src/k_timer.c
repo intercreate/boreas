@@ -21,14 +21,17 @@ static void k_timer_esp_callback(void *arg)
 
 	__atomic_fetch_add(&timer->status, 1, __ATOMIC_RELEASE);
 
-	/* One-shot is done after this expiry; clear running so subsequent
-	 * status_sync / remaining_get behave like an upstream stopped timer. */
-	if (!__atomic_load_n(&timer->is_periodic, __ATOMIC_ACQUIRE)) {
-		__atomic_store_n(&timer->running, false, __ATOMIC_RELEASE);
-	}
-
 	if (timer->expiry_fn) {
 		timer->expiry_fn(timer);
+	}
+
+	/* One-shot is done after this expiry; clear running so subsequent
+	 * status_sync / remaining_get behave like an upstream stopped timer.
+	 * Cleared AFTER expiry_fn so another task can't observe
+	 * running==false and call k_timer_start/_stop while the user's
+	 * callback is still executing on the same struct. */
+	if (!__atomic_load_n(&timer->is_periodic, __ATOMIC_ACQUIRE)) {
+		__atomic_store_n(&timer->running, false, __ATOMIC_RELEASE);
 	}
 }
 
@@ -65,7 +68,7 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t peri
 		esp_timer_stop(timer->handle);
 	}
 
-	timer->status = 0;
+	__atomic_store_n(&timer->status, 0, __ATOMIC_RELAXED);
 	__atomic_store_n(&timer->first_interval_pending, false, __ATOMIC_RELAXED);
 	__atomic_store_n(&timer->is_periodic, !k_timeout_is_no_wait(period), __ATOMIC_RELEASE);
 
@@ -128,10 +131,13 @@ uint32_t k_timer_status_get(struct k_timer *timer)
 
 uint32_t k_timer_status_sync(struct k_timer *timer)
 {
-	/* Block until the timer expires or is stopped. Polls every 1ms.
-	 * Caller-visible semantics match upstream Zephyr's wait-queue
-	 * version (block until expiry or stop, return count atomically);
-	 * the divergence is the polling implementation. */
+	/* Block until the timer expires or is stopped. Polls every
+	 * k_msleep(1), which rounds up to one FreeRTOS tick
+	 * (portTICK_PERIOD_MS, set by CONFIG_FREERTOS_HZ -- 1ms at the
+	 * Boreas default of 1000 Hz, 10ms at the ESP-IDF Kconfig default
+	 * of 100 Hz). Caller-visible semantics match upstream Zephyr's
+	 * wait-queue version (block until expiry or stop, return count
+	 * atomically); the divergence is the polling implementation. */
 	while (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) &&
 	       __atomic_load_n(&timer->status, __ATOMIC_ACQUIRE) == 0) {
 		k_msleep(1);

@@ -364,9 +364,10 @@ uint32_t k_timer_status_get(struct k_timer *timer);
  * @note Boreas implementation polls every k_msleep(1). Upstream
  *       Zephyr blocks the calling thread on a wait queue. Same
  *       caller-visible semantics; the wake granularity here is
- *       bounded by the FreeRTOS tick (typically 10ms on ESP-IDF,
- *       so a wake can be up to ~10ms late). The same pattern is
- *       used by k_thread_join() in this layer.
+ *       bounded by the FreeRTOS tick period (portTICK_PERIOD_MS,
+ *       set by CONFIG_FREERTOS_HZ -- 1ms at the Boreas default of
+ *       1000 Hz, 10ms at the ESP-IDF Kconfig default of 100 Hz).
+ *       A wake can therefore be up to one tick period late.
  */
 uint32_t k_timer_status_sync(struct k_timer *timer);
 

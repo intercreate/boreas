@@ -192,7 +192,7 @@ static void test_timer_remaining_ticks(void)
 	k_msleep(50);
 
 	k_ticks_t remaining = k_timer_remaining_ticks(&timer);
-	/* Roughly 450ms == 45 ticks at 100Hz. Tolerate broad bounds. */
+	/* Roughly 450ms remaining; bounds derived from K_MSEC are tick-rate-agnostic. */
 	k_ticks_t expected_min = k_timeout_to_ticks(K_MSEC(100));
 	k_ticks_t expected_max = k_timeout_to_ticks(K_MSEC(500));
 	TEST_ASSERT_GREATER_THAN(expected_min, remaining);
@@ -213,7 +213,7 @@ static void test_timer_expires_ticks(void)
 	k_timer_start(&timer, K_MSEC(500), K_NO_WAIT);
 	k_ticks_t expires = k_timer_expires_ticks(&timer);
 
-	/* Expiry tick is in the future, ~now + 50 ticks at 100Hz. */
+	/* Expiry tick is in the future. */
 	TEST_ASSERT_GREATER_THAN(now_before, expires);
 
 	k_ticks_t remaining = k_timer_remaining_ticks(&timer);
