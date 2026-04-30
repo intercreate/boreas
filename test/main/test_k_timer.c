@@ -6,10 +6,6 @@
 #include "unity.h"
 #include "zephyr/kernel.h"
 
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
 static volatile int timer_count;
 static volatile int stop_called;
 
@@ -109,10 +105,10 @@ static void test_timer_status_sync_blocking(void)
 	timer_count = 0;
 
 	/* status_sync should block until the next expiry, NOT busy-poll. */
-	uint32_t t0 = (uint32_t)(esp_timer_get_time() / 1000);
+	uint32_t t0 = (uint32_t)k_uptime_get();
 	k_timer_start(&timer, K_MSEC(100), K_NO_WAIT);
 	uint32_t status = k_timer_status_sync(&timer);
-	uint32_t elapsed = (uint32_t)(esp_timer_get_time() / 1000) - t0;
+	uint32_t elapsed = (uint32_t)k_uptime_get() - t0;
 
 	/* Got the single expiry. */
 	TEST_ASSERT_EQUAL(1, status);
@@ -176,9 +172,9 @@ static void test_timer_status_sync_wakes_on_stop(void)
 	k_thread_create(&waker_thread, stop_waker_stack, K_THREAD_STACK_SIZEOF(stop_waker_stack),
 			stop_waker_thread, &ctx, NULL, NULL, 5, 0, K_NO_WAIT);
 
-	uint32_t t0 = (uint32_t)(esp_timer_get_time() / 1000);
+	uint32_t t0 = (uint32_t)k_uptime_get();
 	uint32_t status = k_timer_status_sync(&timer); /* should wake on stop */
-	uint32_t elapsed = (uint32_t)(esp_timer_get_time() / 1000) - t0;
+	uint32_t elapsed = (uint32_t)k_uptime_get() - t0;
 
 	TEST_ASSERT_EQUAL(0, status); /* never expired */
 	TEST_ASSERT_GREATER_OR_EQUAL(40, elapsed);
@@ -197,8 +193,8 @@ static void test_timer_remaining_ticks(void)
 
 	k_ticks_t remaining = k_timer_remaining_ticks(&timer);
 	/* Roughly 450ms == 45 ticks at 100Hz. Tolerate broad bounds. */
-	k_ticks_t expected_min = pdMS_TO_TICKS(100);
-	k_ticks_t expected_max = pdMS_TO_TICKS(500);
+	k_ticks_t expected_min = k_timeout_to_ticks(K_MSEC(100));
+	k_ticks_t expected_max = k_timeout_to_ticks(K_MSEC(500));
 	TEST_ASSERT_GREATER_THAN(expected_min, remaining);
 	TEST_ASSERT_LESS_OR_EQUAL(expected_max, remaining);
 
@@ -213,7 +209,7 @@ static void test_timer_expires_ticks(void)
 	struct k_timer timer;
 	k_timer_init(&timer, NULL, NULL);
 
-	k_ticks_t now_before = (k_ticks_t)xTaskGetTickCount();
+	k_ticks_t now_before = k_uptime_ticks();
 	k_timer_start(&timer, K_MSEC(500), K_NO_WAIT);
 	k_ticks_t expires = k_timer_expires_ticks(&timer);
 
@@ -221,7 +217,7 @@ static void test_timer_expires_ticks(void)
 	TEST_ASSERT_GREATER_THAN(now_before, expires);
 
 	k_ticks_t remaining = k_timer_remaining_ticks(&timer);
-	k_ticks_t now_after = (k_ticks_t)xTaskGetTickCount();
+	k_ticks_t now_after = k_uptime_ticks();
 	/* expires - now ~ remaining. Allow a few-tick slop for jitter. */
 	k_ticks_t computed = expires - now_after;
 	k_ticks_t delta = (computed > remaining) ? (computed - remaining) : (remaining - computed);
@@ -232,7 +228,7 @@ static void test_timer_expires_ticks(void)
 	/* Upstream surprising bit: when stopped, expires_ticks returns
 	 * CURRENT uptime, not zero. */
 	k_ticks_t expires_stopped = k_timer_expires_ticks(&timer);
-	k_ticks_t uptime_now = (k_ticks_t)xTaskGetTickCount();
+	k_ticks_t uptime_now = k_uptime_ticks();
 	k_ticks_t stopped_delta = (expires_stopped > uptime_now) ? (expires_stopped - uptime_now)
 								 : (uptime_now - expires_stopped);
 	TEST_ASSERT_LESS_OR_EQUAL(5, stopped_delta);
@@ -256,9 +252,9 @@ static void test_timer_one_shot_clears_running(void)
 	/* Second sync must return immediately with 0 (timer no longer
 	 * running), not block indefinitely. Capture elapsed to prove
 	 * non-blocking. */
-	uint32_t t0 = (uint32_t)(esp_timer_get_time() / 1000);
+	uint32_t t0 = (uint32_t)k_uptime_get();
 	uint32_t status = k_timer_status_sync(&timer);
-	uint32_t elapsed = (uint32_t)(esp_timer_get_time() / 1000) - t0;
+	uint32_t elapsed = (uint32_t)k_uptime_get() - t0;
 	TEST_ASSERT_EQUAL(0, status);
 	TEST_ASSERT_LESS_THAN(20, elapsed);
 

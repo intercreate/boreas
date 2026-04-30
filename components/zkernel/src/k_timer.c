@@ -14,8 +14,8 @@ static void k_timer_esp_callback(void *arg)
 	struct k_timer *timer = (struct k_timer *)arg;
 
 	/* First-interval transition: first expiry was start_once, now switch to periodic */
-	if (timer->first_interval_pending) {
-		timer->first_interval_pending = false;
+	if (__atomic_load_n(&timer->first_interval_pending, __ATOMIC_ACQUIRE)) {
+		__atomic_store_n(&timer->first_interval_pending, false, __ATOMIC_RELAXED);
 		esp_timer_start_periodic(timer->handle, timer->period_us);
 	}
 
@@ -23,8 +23,8 @@ static void k_timer_esp_callback(void *arg)
 
 	/* One-shot is done after this expiry; clear running so subsequent
 	 * status_sync / remaining_get behave like an upstream stopped timer. */
-	if (!timer->is_periodic) {
-		timer->running = false;
+	if (!__atomic_load_n(&timer->is_periodic, __ATOMIC_ACQUIRE)) {
+		__atomic_store_n(&timer->running, false, __ATOMIC_RELEASE);
 	}
 
 	if (timer->expiry_fn) {
@@ -58,14 +58,16 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
 
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period)
 {
-	/* Stop if already running */
-	if (timer->running) {
+	/* Stop any in-flight callback synchronously; esp_timer_stop blocks
+	 * until the dispatch task is idle, so subsequent stores are
+	 * race-free with respect to the callback. */
+	if (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE)) {
 		esp_timer_stop(timer->handle);
 	}
 
 	timer->status = 0;
-	timer->first_interval_pending = false;
-	timer->is_periodic = !k_timeout_is_no_wait(period);
+	__atomic_store_n(&timer->first_interval_pending, false, __ATOMIC_RELAXED);
+	__atomic_store_n(&timer->is_periodic, !k_timeout_is_no_wait(period), __ATOMIC_RELEASE);
 
 	if (timer->handle == NULL) {
 		ESP_LOGE(TAG, "Timer not initialized");
@@ -89,7 +91,7 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t peri
 			/* Different first interval: use start_once for the first expiry,
 			 * then the callback switches to periodic at period_us. */
 			timer->period_us = period_us;
-			timer->first_interval_pending = true;
+			__atomic_store_n(&timer->first_interval_pending, true, __ATOMIC_RELEASE);
 			esp_err_t err = esp_timer_start_once(timer->handle, duration_us);
 			if (err != ESP_OK) {
 				ESP_LOGE(TAG, "start_once failed: %s", esp_err_to_name(err));
@@ -105,14 +107,14 @@ void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t peri
 		}
 	}
 
-	timer->running = true;
+	__atomic_store_n(&timer->running, true, __ATOMIC_RELEASE);
 }
 
 void k_timer_stop(struct k_timer *timer)
 {
-	if (timer->running) {
+	if (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE)) {
 		esp_timer_stop(timer->handle);
-		timer->running = false;
+		__atomic_store_n(&timer->running, false, __ATOMIC_RELEASE);
 		if (timer->stop_fn) {
 			timer->stop_fn(timer);
 		}
@@ -126,10 +128,12 @@ uint32_t k_timer_status_get(struct k_timer *timer)
 
 uint32_t k_timer_status_sync(struct k_timer *timer)
 {
-	/* Block until the timer expires or is stopped. Polls every 1ms;
-	 * matches the busy-poll pattern used by k_thread_join. Caller-
-	 * visible semantics match upstream Zephyr's wait-queue version. */
-	while (timer->running && __atomic_load_n(&timer->status, __ATOMIC_ACQUIRE) == 0) {
+	/* Block until the timer expires or is stopped. Polls every 1ms.
+	 * Caller-visible semantics match upstream Zephyr's wait-queue
+	 * version (block until expiry or stop, return count atomically);
+	 * the divergence is the polling implementation. */
+	while (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) &&
+	       __atomic_load_n(&timer->status, __ATOMIC_ACQUIRE) == 0) {
 		k_msleep(1);
 	}
 	return __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
@@ -137,7 +141,7 @@ uint32_t k_timer_status_sync(struct k_timer *timer)
 
 uint32_t k_timer_remaining_get(struct k_timer *timer)
 {
-	if (!timer->running || timer->handle == NULL) {
+	if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) || timer->handle == NULL) {
 		return 0;
 	}
 	uint64_t expiry = 0;
@@ -157,7 +161,7 @@ uint32_t k_timer_remaining_get(struct k_timer *timer)
 
 k_ticks_t k_timer_remaining_ticks(const struct k_timer *timer)
 {
-	if (!timer->running || timer->handle == NULL) {
+	if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) || timer->handle == NULL) {
 		return 0;
 	}
 	uint64_t expiry = 0;
@@ -170,9 +174,11 @@ k_ticks_t k_timer_remaining_ticks(const struct k_timer *timer)
 	if (remaining_us <= 0) {
 		return 0;
 	}
-	/* esp_timer microseconds -> FreeRTOS ticks. portTICK_PERIOD_MS is
-	 * the tick period in milliseconds. */
-	return (k_ticks_t)(remaining_us / ((int64_t)portTICK_PERIOD_MS * 1000));
+	/* esp_timer microseconds -> FreeRTOS ticks. Round UP so that any
+	 * positive remaining time reports at least 1 tick -- the contract
+	 * is that 0 means stopped or already expired. */
+	const int64_t tick_us = (int64_t)portTICK_PERIOD_MS * 1000;
+	return (k_ticks_t)((remaining_us + tick_us - 1) / tick_us);
 }
 
 k_ticks_t k_timer_expires_ticks(const struct k_timer *timer)
@@ -180,8 +186,9 @@ k_ticks_t k_timer_expires_ticks(const struct k_timer *timer)
 	const int64_t tick_us = (int64_t)portTICK_PERIOD_MS * 1000;
 
 	/* Upstream: when the timer is not running, returns the CURRENT
-	 * uptime (not zero). esp_timer_get_time() is uptime in us. */
-	if (!timer->running || timer->handle == NULL) {
+	 * uptime (not zero). esp_timer_get_time() is uptime in us, and
+	 * k_uptime_ticks() shares this clock domain. */
+	if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) || timer->handle == NULL) {
 		return (k_ticks_t)(esp_timer_get_time() / tick_us);
 	}
 	uint64_t expiry = 0;
