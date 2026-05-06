@@ -10,6 +10,7 @@
 #include "sdkconfig.h"
 
 #include <errno.h>
+#include "esp_attr.h"
 
 /* Internal queue flag (k_work_q.flags). Not exposed in the public
  * header because it's an implementation detail. */
@@ -326,7 +327,11 @@ static void __attribute__((constructor)) sys_work_q_auto_init(void)
  * Delayable Work
  * ---------------------------------------------------------------- */
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+static void IRAM_ATTR k_work_delayable_timer_expiry(struct k_timer *timer)
+#else
 static void k_work_delayable_timer_expiry(struct k_timer *timer)
+#endif
 {
 	struct k_work_delayable *dwork = CONTAINER_OF(timer, struct k_work_delayable, timer);
 	if (dwork->queue) {

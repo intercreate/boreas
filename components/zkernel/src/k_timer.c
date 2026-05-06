@@ -5,11 +5,17 @@
 
 #include "zephyr/kernel.h"
 
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "k_timer";
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+static void IRAM_ATTR k_timer_esp_callback(void *arg)
+#else
 static void k_timer_esp_callback(void *arg)
+#endif
 {
 	struct k_timer *timer = (struct k_timer *)arg;
 
@@ -50,7 +56,11 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
 	const esp_timer_create_args_t args = {
 		.callback = k_timer_esp_callback,
 		.arg = timer,
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+		.dispatch_method = ESP_TIMER_ISR,
+#else
 		.dispatch_method = ESP_TIMER_TASK,
+#endif
 		.name = "k_timer",
 	};
 	esp_err_t err = esp_timer_create(&args, &timer->handle);
@@ -205,12 +215,3 @@ k_ticks_t k_timer_expires_ticks(const struct k_timer *timer)
 	return (k_ticks_t)(expiry / (uint64_t)tick_us);
 }
 
-void k_timer_user_data_set(struct k_timer *timer, void *user_data)
-{
-	timer->user_data = user_data;
-}
-
-void *k_timer_user_data_get(struct k_timer *timer)
-{
-	return timer->user_data;
-}
