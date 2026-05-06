@@ -6,6 +6,9 @@
 #include "zephyr/kernel.h"
 
 #include <errno.h>
+#include "esp_attr.h"
+#include "freertos/timers.h"
+#include "sdkconfig.h"
 
 /* Trampoline: adapts Zephyr's 3-arg entry to FreeRTOS's 1-arg entry.
  * If _start_suspended is set, suspends self before calling entry
@@ -24,6 +27,27 @@ static void k_thread_entry_wrapper(void *arg)
 	vTaskSuspend(NULL);
 }
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+static void k_thread_delay_resume_pended(void *param, uint32_t unused)
+{
+	(void)unused;
+	struct k_thread *thread = (struct k_thread *)param;
+	if (thread && thread->handle) {
+		vTaskResume(thread->handle);
+	}
+}
+
+static void IRAM_ATTR k_thread_delay_expiry(struct k_timer *timer)
+{
+	struct k_thread *thread = (struct k_thread *)k_timer_user_data_get(timer);
+	if (thread) {
+		BaseType_t woken = pdFALSE;
+		xTimerPendFunctionCallFromISR(k_thread_delay_resume_pended,
+					      thread, 0, &woken);
+		portYIELD_FROM_ISR(woken);
+	}
+}
+#else
 static void k_thread_delay_expiry(struct k_timer *timer)
 {
 	struct k_thread *thread = (struct k_thread *)k_timer_user_data_get(timer);
@@ -31,6 +55,7 @@ static void k_thread_delay_expiry(struct k_timer *timer)
 		vTaskResume(thread->handle);
 	}
 }
+#endif
 
 k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
 			k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
@@ -49,9 +74,13 @@ k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stac
 	/* Set flag BEFORE creating task so the wrapper sees it immediately */
 	thread->_start_suspended = !k_timeout_is_no_wait(delay);
 
-	thread->handle = xTaskCreateStatic(
+	/* Pin to core 0. ESP-IDF's vPortCleanUpCoprocArea passes
+	 * tskNO_AFFINITY (0x7FFFFFFF) to _xt_coproc_release, which
+	 * overflows the owner-table index and silently skips the real
+	 * entries — leaving stale FPU ownership that crashes later. */
+	thread->handle = xTaskCreateStaticPinnedToCore(
 		k_thread_entry_wrapper, thread->name ? thread->name : "k_thread",
-		stack_size / sizeof(StackType_t), thread, prio, stack, &thread->tcb);
+		stack_size / sizeof(StackType_t), thread, prio, stack, &thread->tcb, 0);
 
 	/* xTaskCreateStatic only fails on programmer error (misaligned
 	 * stack, NULL stack pointer, etc.). Match upstream Zephyr's
@@ -60,7 +89,6 @@ k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stac
 	__ASSERT(thread->handle != NULL, "k_thread_create: xTaskCreateStatic failed");
 
 	if (!k_timeout_is_forever(delay) && !k_timeout_is_no_wait(delay)) {
-		/* Finite delay: thread self-suspended, set up timer to resume */
 		k_timer_init(&thread->_delay_timer, k_thread_delay_expiry, NULL);
 		k_timer_user_data_set(&thread->_delay_timer, thread);
 		k_timer_start(&thread->_delay_timer, delay, K_NO_WAIT);

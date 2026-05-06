@@ -5,6 +5,8 @@
 
 #include "zsys/watchdog.h"
 
+#include "esp_attr.h"
+#include "sdkconfig.h"
 #include "zsys/log.h"
 #include "zephyr/kernel.h"
 
@@ -18,10 +20,11 @@ static zsys_watchdog_timeout_cb_t timeout_callback = NULL;
 static portMUX_TYPE wdt_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 static struct k_timer supervisor_timer;
+static struct k_work supervisor_work;
 
-static void supervisor_check(struct k_timer *timer)
+static void supervisor_work_handler(struct k_work *work)
 {
-	(void)timer;
+	(void)work;
 	int64_t now = k_uptime_get();
 
 	for (int i = 0; i < entry_count; i++) {
@@ -43,9 +46,20 @@ static void supervisor_check(struct k_timer *timer)
 	}
 }
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+static void IRAM_ATTR supervisor_check(struct k_timer *timer)
+#else
+static void supervisor_check(struct k_timer *timer)
+#endif
+{
+	(void)timer;
+	k_work_submit(&supervisor_work);
+}
+
 void zsys_watchdog_init(k_timeout_t check_interval, zsys_watchdog_timeout_cb_t timeout_cb)
 {
 	timeout_callback = timeout_cb;
+	k_work_init(&supervisor_work, supervisor_work_handler);
 	k_timer_init(&supervisor_timer, supervisor_check, NULL);
 	k_timer_start(&supervisor_timer, check_interval, check_interval);
 	LOG_INF("Watchdog supervisor started");
