@@ -7,7 +7,9 @@
 
 #include <errno.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "k_sem";
 
@@ -30,7 +32,11 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 	return k_timeout_is_no_wait(timeout) ? -EBUSY : -EAGAIN;
 }
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+void IRAM_ATTR k_sem_give(struct k_sem *sem)
+#else
 void k_sem_give(struct k_sem *sem)
+#endif
 {
 	if (xPortInIsrContext()) {
 		BaseType_t wake = pdFALSE;

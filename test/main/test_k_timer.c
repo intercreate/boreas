@@ -3,6 +3,8 @@
  * Copyright 2026 Intercreate
  */
 
+#include <stdint.h>
+
 #include "unity.h"
 #include "zephyr/kernel.h"
 #include "sdkconfig.h"
@@ -332,9 +334,10 @@ extern int _iram_text_end;
 
 static void test_timer_callback_iram_attr(void)
 {
-	void *fn = (void *)isr_context_check_cb;
-	TEST_ASSERT_TRUE_MESSAGE((fn >= (void *)&_iram_text_start && fn < (void *)&_iram_text_end),
-				 "IRAM_ATTR callback is not in IRAM address range");
+	uintptr_t fn = (uintptr_t)isr_context_check_cb;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"IRAM_ATTR callback is not in IRAM address range");
 }
 
 static struct k_sem isr_test_sem;
@@ -374,6 +377,22 @@ static void test_timer_isr_safe_apis(void)
 	k_timer_stop(&timer);
 }
 
+static void test_k_work_submit_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_work_submit;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_work_submit is not in IRAM address range");
+}
+
+static void test_k_sem_give_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_sem_give;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_sem_give is not in IRAM address range");
+}
+
 #endif /* CONFIG_K_TIMER_DISPATCH_ISR */
 
 void test_k_timer_group(void)
@@ -395,5 +414,7 @@ void test_k_timer_group(void)
 	RUN_TEST(test_timer_callback_in_isr_context);
 	RUN_TEST(test_timer_callback_iram_attr);
 	RUN_TEST(test_timer_isr_safe_apis);
+	RUN_TEST(test_k_work_submit_iram_attr);
+	RUN_TEST(test_k_sem_give_iram_attr);
 #endif
 }

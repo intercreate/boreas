@@ -33,6 +33,7 @@ static struct k_work heartbeat_log_work;
 
 static void heartbeat_log_handler(struct k_work *work)
 {
+	ARG_UNUSED(work);
 	LOG_INF("[Timer] Heartbeat #%d", heartbeat_count);
 }
 

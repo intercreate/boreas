@@ -22,7 +22,9 @@ static void k_timer_esp_callback(void *arg)
 	/* First-interval transition: first expiry was start_once, now switch to periodic */
 	if (__atomic_load_n(&timer->first_interval_pending, __ATOMIC_ACQUIRE)) {
 		__atomic_store_n(&timer->first_interval_pending, false, __ATOMIC_RELAXED);
-		esp_timer_start_periodic(timer->handle, timer->period_us);
+		esp_err_t err = esp_timer_start_periodic(timer->handle, timer->period_us);
+		__ASSERT(err == ESP_OK, "esp_timer_start_periodic failed in callback");
+		(void)err;
 	}
 
 	__atomic_fetch_add(&timer->status, 1, __ATOMIC_RELEASE);
@@ -71,9 +73,12 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
 
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period)
 {
-	/* Stop any in-flight callback synchronously; esp_timer_stop blocks
-	 * until the dispatch task is idle, so subsequent stores are
-	 * race-free with respect to the callback. */
+	/* Stop any in-flight timer. With ESP_TIMER_TASK dispatch,
+	 * esp_timer_stop blocks until the callback finishes; with
+	 * ESP_TIMER_ISR dispatch it only removes the timer from the
+	 * armed list (the ISR callback may still be executing on
+	 * another core). Callers must not restart a timer whose
+	 * callback is still running — same constraint as upstream Zephyr. */
 	if (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE)) {
 		esp_timer_stop(timer->handle);
 	}

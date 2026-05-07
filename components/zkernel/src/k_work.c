@@ -113,7 +113,11 @@ void k_work_init(struct k_work *work, k_work_handler_t handler)
 	work->node.prev = NULL;
 }
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+static int IRAM_ATTR k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
+#else
 static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
+#endif
 {
 	z_work_lock(queue);
 
@@ -134,7 +138,11 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
 	return 0;
 }
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+int IRAM_ATTR k_work_submit(struct k_work *work)
+#else
 int k_work_submit(struct k_work *work)
+#endif
 {
 	if (!(__atomic_load_n(&k_sys_work_q.flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
 		return -EINVAL;
@@ -142,7 +150,11 @@ int k_work_submit(struct k_work *work)
 	return k_work_submit_internal(&k_sys_work_q, work);
 }
 
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+int IRAM_ATTR k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work)
+#else
 int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work)
+#endif
 {
 	if (!(__atomic_load_n(&queue->flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
 		return -EINVAL;
