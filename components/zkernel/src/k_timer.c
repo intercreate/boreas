@@ -214,4 +214,3 @@ k_ticks_t k_timer_expires_ticks(const struct k_timer *timer)
 	}
 	return (k_ticks_t)(expiry / (uint64_t)tick_us);
 }
-

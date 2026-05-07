@@ -28,7 +28,7 @@ LOG_MODULE_REGISTER(demo, LOG_LEVEL_INF);
  * runs in ISR context. Use k_work_submit to defer logging to a task.
  * ---------------------------------------------------------------- */
 
-static int heartbeat_count = 0;
+static volatile int heartbeat_count = 0;
 static struct k_work heartbeat_log_work;
 
 static void heartbeat_log_handler(struct k_work *work)
