@@ -408,7 +408,7 @@ static inline void k_timer_user_data_set(struct k_timer *timer, void *user_data)
 	timer->user_data = user_data;
 }
 
-static inline void *k_timer_user_data_get(struct k_timer *timer)
+static inline void *k_timer_user_data_get(const struct k_timer *timer)
 {
 	return timer->user_data;
 }

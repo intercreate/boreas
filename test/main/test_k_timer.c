@@ -324,8 +324,7 @@ static void test_timer_callback_in_isr_context(void)
 	k_msleep(100);
 	k_timer_stop(&timer);
 
-	TEST_ASSERT_TRUE_MESSAGE(isr_context_result,
-				 "Expiry callback did not run in ISR context");
+	TEST_ASSERT_TRUE_MESSAGE(isr_context_result, "Expiry callback did not run in ISR context");
 }
 
 extern int _iram_text_start;
@@ -334,9 +333,8 @@ extern int _iram_text_end;
 static void test_timer_callback_iram_attr(void)
 {
 	void *fn = (void *)isr_context_check_cb;
-	TEST_ASSERT_TRUE_MESSAGE(
-		(fn >= (void *)&_iram_text_start && fn < (void *)&_iram_text_end),
-		"IRAM_ATTR callback is not in IRAM address range");
+	TEST_ASSERT_TRUE_MESSAGE((fn >= (void *)&_iram_text_start && fn < (void *)&_iram_text_end),
+				 "IRAM_ATTR callback is not in IRAM address range");
 }
 
 static struct k_sem isr_test_sem;

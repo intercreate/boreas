@@ -42,8 +42,7 @@ static void IRAM_ATTR k_thread_delay_expiry(struct k_timer *timer)
 	struct k_thread *thread = (struct k_thread *)k_timer_user_data_get(timer);
 	if (thread) {
 		BaseType_t woken = pdFALSE;
-		xTimerPendFunctionCallFromISR(k_thread_delay_resume_pended,
-					      thread, 0, &woken);
+		xTimerPendFunctionCallFromISR(k_thread_delay_resume_pended, thread, 0, &woken);
 		portYIELD_FROM_ISR(woken);
 	}
 }
@@ -77,7 +76,7 @@ k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stac
 	/* Pin to core 0. ESP-IDF's vPortCleanUpCoprocArea passes
 	 * tskNO_AFFINITY (0x7FFFFFFF) to _xt_coproc_release, which
 	 * overflows the owner-table index and silently skips the real
-	 * entries — leaving stale FPU ownership that crashes later. */
+	 * entries — leaking stale FPU ownership. */
 	thread->handle = xTaskCreateStaticPinnedToCore(
 		k_thread_entry_wrapper, thread->name ? thread->name : "k_thread",
 		stack_size / sizeof(StackType_t), thread, prio, stack, &thread->tcb, 0);
