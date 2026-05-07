@@ -42,7 +42,9 @@ static void IRAM_ATTR k_thread_delay_expiry(struct k_timer *timer)
 	struct k_thread *thread = (struct k_thread *)k_timer_user_data_get(timer);
 	if (thread) {
 		BaseType_t woken = pdFALSE;
-		xTimerPendFunctionCallFromISR(k_thread_delay_resume_pended, thread, 0, &woken);
+		BaseType_t ret = xTimerPendFunctionCallFromISR(k_thread_delay_resume_pended, thread,
+							       0, &woken);
+		__ASSERT(ret == pdPASS, "xTimerPendFunctionCallFromISR failed (queue full)");
 		portYIELD_FROM_ISR(woken);
 	}
 }
