@@ -37,14 +37,16 @@ static void k_thread_delay_resume_pended(void *param, uint32_t unused)
 	}
 }
 
-static void IRAM_ATTR k_thread_delay_expiry(struct k_timer *timer)
+static void K_ISR_SAFE k_thread_delay_expiry(struct k_timer *timer)
 {
 	struct k_thread *thread = (struct k_thread *)k_timer_user_data_get(timer);
 	if (thread) {
 		BaseType_t woken = pdFALSE;
 		BaseType_t ret = xTimerPendFunctionCallFromISR(k_thread_delay_resume_pended, thread,
 							       0, &woken);
-		__ASSERT(ret == pdPASS, "xTimerPendFunctionCallFromISR failed (queue full)");
+		if (ret != pdPASS) {
+			k_panic();
+		}
 		portYIELD_FROM_ISR(woken);
 	}
 }
@@ -83,12 +85,14 @@ k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stac
 		k_thread_entry_wrapper, thread->name ? thread->name : "k_thread",
 		stack_size / sizeof(StackType_t), thread, prio, stack, &thread->tcb, 0);
 
-	/* xTaskCreateStatic only fails on programmer error (misaligned
-	 * stack, NULL stack pointer, etc.). Match upstream Zephyr's
-	 * "always returns a valid tid" contract by asserting here rather
-	 * than returning NULL -- callers ported from Zephyr won't check. */
-	__ASSERT(thread->handle != NULL, "k_thread_create: xTaskCreateStatic failed");
+	/* xTaskCreateStaticPinnedToCore only fails on programmer error
+	 * (misaligned stack, NULL stack pointer, etc.). Match upstream
+	 * Zephyr's "always returns a valid tid" contract by asserting
+	 * here rather than returning NULL -- callers ported from Zephyr
+	 * won't check. */
+	__ASSERT(thread->handle != NULL, "k_thread_create: xTaskCreateStaticPinnedToCore failed");
 
+	/* Finite delay: thread self-suspended, set up timer to resume */
 	if (!k_timeout_is_forever(delay) && !k_timeout_is_no_wait(delay)) {
 		k_timer_init(&thread->_delay_timer, k_thread_delay_expiry, NULL);
 		k_timer_user_data_set(&thread->_delay_timer, thread);

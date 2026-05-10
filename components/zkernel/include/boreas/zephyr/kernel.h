@@ -312,8 +312,9 @@ struct k_timer;
  *              k_mutex_lock, k_msleep, k_thread_join).
  *            - The following are ISR-safe and may be called:
  *              k_sem_give, k_work_submit, k_event_set/post/clear,
- *              k_msgq_put (K_NO_WAIT), LOG_* (with
- *              CONFIG_ZSYS_LOG_MODE_DEFERRED=y only).
+ *              k_msgq_put (K_NO_WAIT).
+ *            - LOG_* is NOT ISR-safe (vsnprintf in the emit path is
+ *              flash-resident). Defer logging via k_work_submit.
  *            - Must not call malloc, printf, or any flash-resident
  *              function (IRAM_ATTR is required for cache survival).
  *
@@ -348,6 +349,18 @@ struct k_timer {
 	}
 
 void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_stop_t stop_fn);
+/**
+ * @brief Start or restart a timer.
+ *
+ * @param timer   Timer to start.
+ * @param duration Time until the first expiry.
+ * @param period  Repeat interval after the first expiry (K_NO_WAIT for one-shot).
+ *
+ * @warning Must not be called while the timer's expiry callback is
+ *          executing (same constraint as upstream Zephyr). With
+ *          CONFIG_K_TIMER_DISPATCH_ISR=y, esp_timer_stop does not
+ *          synchronize with an in-flight ISR callback on SMP targets.
+ */
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period);
 void k_timer_stop(struct k_timer *timer);
 

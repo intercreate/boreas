@@ -46,11 +46,7 @@ static void supervisor_work_handler(struct k_work *work)
 	}
 }
 
-#ifdef CONFIG_K_TIMER_DISPATCH_ISR
-static void IRAM_ATTR supervisor_check(struct k_timer *timer)
-#else
-static void supervisor_check(struct k_timer *timer)
-#endif
+static void K_ISR_SAFE supervisor_check(struct k_timer *timer)
 {
 	(void)timer;
 	k_work_submit(&supervisor_work);
