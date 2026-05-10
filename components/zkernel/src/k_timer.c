@@ -11,20 +11,19 @@
 
 static const char *TAG = "k_timer";
 
-#ifdef CONFIG_K_TIMER_DISPATCH_ISR
-static void IRAM_ATTR k_timer_esp_callback(void *arg)
-#else
-static void k_timer_esp_callback(void *arg)
-#endif
+static void K_ISR_SAFE k_timer_esp_callback(void *arg)
 {
 	struct k_timer *timer = (struct k_timer *)arg;
 
 	/* First-interval transition: first expiry was start_once, now switch to periodic */
 	if (__atomic_load_n(&timer->first_interval_pending, __ATOMIC_ACQUIRE)) {
 		__atomic_store_n(&timer->first_interval_pending, false, __ATOMIC_RELAXED);
+		/* Cannot fail: timer_process_alarm zeroes alarm before callback,
+		 * so timer_armed() is false and start_periodic succeeds. */
 		esp_err_t err = esp_timer_start_periodic(timer->handle, timer->period_us);
-		__ASSERT(err == ESP_OK, "esp_timer_start_periodic failed in callback");
-		(void)err;
+		if (err != ESP_OK) {
+			k_panic();
+		}
 	}
 
 	__atomic_fetch_add(&timer->status, 1, __ATOMIC_RELEASE);

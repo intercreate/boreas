@@ -32,11 +32,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 	return k_timeout_is_no_wait(timeout) ? -EBUSY : -EAGAIN;
 }
 
-#ifdef CONFIG_K_TIMER_DISPATCH_ISR
-void IRAM_ATTR k_sem_give(struct k_sem *sem)
-#else
-void k_sem_give(struct k_sem *sem)
-#endif
+void K_ISR_SAFE k_sem_give(struct k_sem *sem)
 {
 	if (xPortInIsrContext()) {
 		BaseType_t wake = pdFALSE;

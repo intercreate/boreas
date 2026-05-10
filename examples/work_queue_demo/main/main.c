@@ -28,24 +28,26 @@ LOG_MODULE_REGISTER(demo, LOG_LEVEL_INF);
  * runs in ISR context. Use k_work_submit to defer logging to a task.
  * ---------------------------------------------------------------- */
 
-static volatile int heartbeat_count = 0;
+static atomic_t heartbeat_count = ATOMIC_INIT(0);
 static struct k_work heartbeat_log_work;
 
 static void heartbeat_log_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	LOG_INF("[Timer] Heartbeat #%d", heartbeat_count);
+	LOG_INF("[Timer] Heartbeat #%ld", atomic_get(&heartbeat_count));
 }
 
 static void IRAM_ATTR heartbeat_expiry(struct k_timer *timer)
 {
-	heartbeat_count++;
+	ARG_UNUSED(timer);
+	atomic_add(&heartbeat_count, 1);
 	k_work_submit(&heartbeat_log_work);
 }
 
 static void heartbeat_stop(struct k_timer *timer)
 {
-	LOG_INF("[Timer] Heartbeat stopped after %d beats", heartbeat_count);
+	ARG_UNUSED(timer);
+	LOG_INF("[Timer] Heartbeat stopped after %ld beats", atomic_get(&heartbeat_count));
 }
 
 static struct k_timer heartbeat_timer;

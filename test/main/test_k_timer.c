@@ -18,11 +18,13 @@ static volatile int stop_called;
 
 static void IRAM_ATTR test_timer_cb(struct k_timer *timer)
 {
+	ARG_UNUSED(timer);
 	timer_count++;
 }
 
 static void test_stop_cb(struct k_timer *timer)
 {
+	ARG_UNUSED(timer);
 	stop_called++;
 }
 
@@ -313,6 +315,7 @@ static volatile bool isr_context_result;
 
 static void IRAM_ATTR isr_context_check_cb(struct k_timer *timer)
 {
+	ARG_UNUSED(timer);
 	isr_context_result = xPortInIsrContext();
 }
 
@@ -346,6 +349,7 @@ static volatile bool isr_work_ran;
 
 static void IRAM_ATTR isr_safe_apis_cb(struct k_timer *timer)
 {
+	ARG_UNUSED(timer);
 	k_sem_give(&isr_test_sem);
 	k_work_submit(&isr_test_work);
 }
@@ -393,6 +397,46 @@ static void test_k_sem_give_iram_attr(void)
 		"k_sem_give is not in IRAM address range");
 }
 
+static void test_k_event_set_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_event_set;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_event_set is not in IRAM address range");
+}
+
+static void test_k_event_post_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_event_post;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_event_post is not in IRAM address range");
+}
+
+static void test_k_event_clear_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_event_clear;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_event_clear is not in IRAM address range");
+}
+
+static void test_k_msgq_put_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_msgq_put;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_msgq_put is not in IRAM address range");
+}
+
+static void test_k_work_submit_to_queue_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_work_submit_to_queue;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_work_submit_to_queue is not in IRAM address range");
+}
+
 #endif /* CONFIG_K_TIMER_DISPATCH_ISR */
 
 void test_k_timer_group(void)
@@ -416,5 +460,10 @@ void test_k_timer_group(void)
 	RUN_TEST(test_timer_isr_safe_apis);
 	RUN_TEST(test_k_work_submit_iram_attr);
 	RUN_TEST(test_k_sem_give_iram_attr);
+	RUN_TEST(test_k_event_set_iram_attr);
+	RUN_TEST(test_k_event_post_iram_attr);
+	RUN_TEST(test_k_event_clear_iram_attr);
+	RUN_TEST(test_k_msgq_put_iram_attr);
+	RUN_TEST(test_k_work_submit_to_queue_iram_attr);
 #endif
 }
