@@ -288,6 +288,10 @@ struct k_event {
 
 int k_event_init(struct k_event *event);
 uint32_t k_event_post(struct k_event *event, uint32_t events);
+/** @note In ISR context, returns 0 on failure (timer command queue full)
+ *        rather than the previous event state. FreeRTOS's
+ *        xEventGroupSetBitsFromISR defers to the timer daemon and cannot
+ *        report the prior bits synchronously. */
 uint32_t k_event_set(struct k_event *event, uint32_t events);
 uint32_t k_event_clear(struct k_event *event, uint32_t events);
 uint32_t k_event_wait(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout);
@@ -302,21 +306,25 @@ struct k_timer;
 /**
  * Timer expiry function type.
  *
- * @warning Callback context divergence from upstream Zephyr.
- *          Upstream Zephyr documents this callback as running in
- *          "system clock interrupt handler" context. Boreas dispatches
- *          via esp_timer with ESP_TIMER_TASK, which is a normal
- *          FreeRTOS task -- NOT an ISR. Practical consequences:
- *            - Blocking calls (k_sem_take, k_mutex_lock, k_msleep) are
- *              permitted from this callback. Upstream forbids them.
- *            - There is no K_ISR_LOCK-equivalent guarantee. The
- *              callback IS preemptible by higher-priority tasks.
- *            - Code ported from upstream that assumes ISR semantics
- *              (e.g. relying on irq_lock for atomicity vs. user code)
- *              must be reviewed.
+ * @warning Callback context — matches upstream Zephyr when
+ *          CONFIG_K_TIMER_DISPATCH_ISR=y (the default).
  *
- *          Code that needs both behaviors should not assume either --
- *          use k_sem / k_mutex for synchronization regardless.
+ *          **Default (ISR dispatch):** Callback runs in true ISR context
+ *          via ESP_TIMER_ISR. The function must be declared IRAM_ATTR
+ *          and must be ISR-safe:
+ *            - Must NOT call blocking APIs (k_sem_take with timeout,
+ *              k_mutex_lock, k_msleep, k_thread_join).
+ *            - The following are ISR-safe and may be called:
+ *              k_sem_give, k_work_submit, k_event_set/post/clear,
+ *              k_msgq_put (K_NO_WAIT).
+ *            - LOG_* is NOT ISR-safe (vsnprintf in the emit path is
+ *              flash-resident). Defer logging via k_work_submit.
+ *            - Must not call malloc, printf, or any flash-resident
+ *              function (IRAM_ATTR is required for cache survival).
+ *
+ *          **Fallback (CONFIG_K_TIMER_DISPATCH_ISR=n):** Callback runs
+ *          on the ESP_TIMER_TASK, a normal FreeRTOS task. Blocking calls
+ *          are permitted. This diverges from upstream Zephyr.
  */
 typedef void (*k_timer_expiry_t)(struct k_timer *timer);
 
@@ -345,6 +353,18 @@ struct k_timer {
 	}
 
 void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_stop_t stop_fn);
+/**
+ * @brief Start or restart a timer.
+ *
+ * @param timer   Timer to start.
+ * @param duration Time until the first expiry.
+ * @param period  Repeat interval after the first expiry (K_NO_WAIT for one-shot).
+ *
+ * @warning Must not be called while the timer's expiry callback is
+ *          executing (same constraint as upstream Zephyr). With
+ *          CONFIG_K_TIMER_DISPATCH_ISR=y, esp_timer_stop does not
+ *          synchronize with an in-flight ISR callback on SMP targets.
+ */
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period);
 void k_timer_stop(struct k_timer *timer);
 
@@ -400,8 +420,15 @@ k_ticks_t k_timer_remaining_ticks(const struct k_timer *timer);
  */
 k_ticks_t k_timer_expires_ticks(const struct k_timer *timer);
 
-void k_timer_user_data_set(struct k_timer *timer, void *user_data);
-void *k_timer_user_data_get(struct k_timer *timer);
+static ALWAYS_INLINE void k_timer_user_data_set(struct k_timer *timer, void *user_data)
+{
+	timer->user_data = user_data;
+}
+
+static ALWAYS_INLINE void *k_timer_user_data_get(const struct k_timer *timer)
+{
+	return timer->user_data;
+}
 
 /* ----------------------------------------------------------------
  * Work Queue

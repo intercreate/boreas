@@ -10,6 +10,7 @@
 #include "sdkconfig.h"
 
 #include <errno.h>
+#include "esp_attr.h"
 
 /* Internal queue flag (k_work_q.flags). Not exposed in the public
  * header because it's an implementation detail. */
@@ -35,7 +36,7 @@ struct k_work_q k_sys_work_q;
 /* Branch-once helpers around portENTER/EXIT_CRITICAL: ESP-IDF needs
  * different macros for ISR vs task context. Inlined to avoid runtime
  * overhead in the common (task) case. */
-static inline void z_work_lock(struct k_work_q *queue)
+static ALWAYS_INLINE void z_work_lock(struct k_work_q *queue)
 {
 	if (xPortInIsrContext()) {
 		portENTER_CRITICAL_ISR(&queue->lock);
@@ -44,7 +45,7 @@ static inline void z_work_lock(struct k_work_q *queue)
 	}
 }
 
-static inline void z_work_unlock(struct k_work_q *queue)
+static ALWAYS_INLINE void z_work_unlock(struct k_work_q *queue)
 {
 	if (xPortInIsrContext()) {
 		portEXIT_CRITICAL_ISR(&queue->lock);
@@ -112,7 +113,7 @@ void k_work_init(struct k_work *work, k_work_handler_t handler)
 	work->node.prev = NULL;
 }
 
-static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
+static int K_ISR_SAFE k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
 {
 	z_work_lock(queue);
 
@@ -133,7 +134,7 @@ static int k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
 	return 0;
 }
 
-int k_work_submit(struct k_work *work)
+int K_ISR_SAFE k_work_submit(struct k_work *work)
 {
 	if (!(__atomic_load_n(&k_sys_work_q.flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
 		return -EINVAL;
@@ -141,7 +142,7 @@ int k_work_submit(struct k_work *work)
 	return k_work_submit_internal(&k_sys_work_q, work);
 }
 
-int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work)
+int K_ISR_SAFE k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work)
 {
 	if (!(__atomic_load_n(&queue->flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
 		return -EINVAL;
@@ -326,7 +327,7 @@ static void __attribute__((constructor)) sys_work_q_auto_init(void)
  * Delayable Work
  * ---------------------------------------------------------------- */
 
-static void k_work_delayable_timer_expiry(struct k_timer *timer)
+static void K_ISR_SAFE k_work_delayable_timer_expiry(struct k_timer *timer)
 {
 	struct k_work_delayable *dwork = CONTAINER_OF(timer, struct k_work_delayable, timer);
 	if (dwork->queue) {

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "esp_attr.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -101,7 +103,9 @@ extern "C" {
 #define ALWAYS_INLINE __attribute__((always_inline)) inline
 #endif
 
-/* Runtime assertion -- logs and aborts */
+/* Runtime assertion -- logs and aborts.
+ * NOT safe from IRAM ISR context (ESP_LOGE + abort are flash-resident).
+ * Use k_panic() for unrecoverable errors in ISR/IRAM context. */
 #ifndef __ASSERT
 #include "esp_log.h"
 #define __ASSERT(cond, msg)                                                                        \
@@ -112,6 +116,18 @@ extern "C" {
 		}                                                                                  \
 	} while (0)
 #endif
+
+/* IRAM-safe panic -- triggers an illegal-instruction exception caught by
+ * the ESP-IDF panic handler (which is IRAM-resident). Produces a full
+ * backtrace on UART and reboots. Safe to call from IRAM_ATTR ISR context.
+ * Mirrors upstream Zephyr's k_panic() contract. */
+#define k_panic() __builtin_trap()
+
+/* Attribute for kernel functions callable from ISR context.
+ * Always IRAM-resident: upstream Zephyr marks these isr-ok
+ * unconditionally, and ESP-IDF ISRs registered with
+ * ESP_INTR_FLAG_IRAM fire during cache-disabled windows. */
+#define K_ISR_SAFE IRAM_ATTR
 
 #ifdef __cplusplus
 }
