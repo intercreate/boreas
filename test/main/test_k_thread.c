@@ -255,8 +255,8 @@ static void test_thread_suspend_resume_current_get(void)
 	phases_completed = 0;
 
 	k_tid_t tid = k_thread_create(&suspend_test_thread, suspend_test_stack,
-				      K_THREAD_STACK_SIZEOF(suspend_test_stack),
-				      suspend_test_entry, NULL, NULL, NULL, 5, 0, K_NO_WAIT);
+				      K_THREAD_STACK_SIZEOF(suspend_test_stack), suspend_test_entry,
+				      NULL, NULL, NULL, 5, 0, K_NO_WAIT);
 
 	/* Wait for thread to record its tid */
 	k_msleep(50);

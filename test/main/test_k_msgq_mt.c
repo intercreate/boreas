@@ -19,10 +19,10 @@
  * timeout duration.
  * --------------------------------------------------------- */
 
-#define MSGQ_DEPTH     3
-#define MSG_SIZE       sizeof(uint32_t)
-#define TIMEOUT_MS     100
-#define TOLERANCE_MS   50
+#define MSGQ_DEPTH   3
+#define MSG_SIZE     sizeof(uint32_t)
+#define TIMEOUT_MS   100
+#define TOLERANCE_MS 50
 
 static uint8_t __attribute__((aligned(4))) msgq_buf[MSG_SIZE * MSGQ_DEPTH];
 static struct k_msgq test_msgq;
