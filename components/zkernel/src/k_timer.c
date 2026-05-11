@@ -5,18 +5,25 @@
 
 #include "zephyr/kernel.h"
 
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "k_timer";
 
-static void k_timer_esp_callback(void *arg)
+static void K_ISR_SAFE k_timer_esp_callback(void *arg)
 {
 	struct k_timer *timer = (struct k_timer *)arg;
 
 	/* First-interval transition: first expiry was start_once, now switch to periodic */
 	if (__atomic_load_n(&timer->first_interval_pending, __ATOMIC_ACQUIRE)) {
 		__atomic_store_n(&timer->first_interval_pending, false, __ATOMIC_RELAXED);
-		esp_timer_start_periodic(timer->handle, timer->period_us);
+		/* Cannot fail: timer_process_alarm zeroes alarm before callback,
+		 * so timer_armed() is false and start_periodic succeeds. */
+		esp_err_t err = esp_timer_start_periodic(timer->handle, timer->period_us);
+		if (err != ESP_OK) {
+			k_panic();
+		}
 	}
 
 	__atomic_fetch_add(&timer->status, 1, __ATOMIC_RELEASE);
@@ -50,20 +57,25 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
 	const esp_timer_create_args_t args = {
 		.callback = k_timer_esp_callback,
 		.arg = timer,
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+		.dispatch_method = ESP_TIMER_ISR,
+#else
 		.dispatch_method = ESP_TIMER_TASK,
+#endif
 		.name = "k_timer",
 	};
 	esp_err_t err = esp_timer_create(&args, &timer->handle);
-	if (err != ESP_OK) {
-		ESP_LOGE(TAG, "esp_timer_create failed: %s", esp_err_to_name(err));
-	}
+	__ASSERT(err == ESP_OK, "k_timer_init: esp_timer_create failed");
 }
 
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period)
 {
-	/* Stop any in-flight callback synchronously; esp_timer_stop blocks
-	 * until the dispatch task is idle, so subsequent stores are
-	 * race-free with respect to the callback. */
+	/* Stop any in-flight timer. With ESP_TIMER_TASK dispatch,
+	 * esp_timer_stop blocks until the callback finishes; with
+	 * ESP_TIMER_ISR dispatch it only removes the timer from the
+	 * armed list (the ISR callback may still be executing on
+	 * another core). Callers must not restart a timer whose
+	 * callback is still running — same constraint as upstream Zephyr. */
 	if (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE)) {
 		esp_timer_stop(timer->handle);
 	}
@@ -203,14 +215,4 @@ k_ticks_t k_timer_expires_ticks(const struct k_timer *timer)
 		return (k_ticks_t)(esp_timer_get_time() / tick_us);
 	}
 	return (k_ticks_t)(expiry / (uint64_t)tick_us);
-}
-
-void k_timer_user_data_set(struct k_timer *timer, void *user_data)
-{
-	timer->user_data = user_data;
-}
-
-void *k_timer_user_data_get(struct k_timer *timer)
-{
-	return timer->user_data;
 }

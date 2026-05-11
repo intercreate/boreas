@@ -63,6 +63,19 @@ menu "Boreas Kernel (zkernel)"
             responsiveness for equal-or-lower-priority work. Mirrors
             upstream Zephyr's CONFIG_SYSTEM_WORKQUEUE_NO_YIELD.
 
+    config K_TIMER_DISPATCH_ISR
+        bool "Dispatch k_timer callbacks in ISR context"
+        default y
+        select ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
+        help
+            When enabled, k_timer expiry callbacks run in true ISR context
+            (ESP_TIMER_ISR dispatch), matching upstream Zephyr's contract.
+            Callbacks must be IRAM_ATTR and must not call blocking APIs.
+
+            When disabled, callbacks run on the ESP_TIMER_TASK (a normal
+            FreeRTOS task). Blocking calls are permitted but the behavior
+            diverges from upstream Zephyr.
+
     config ZKERNEL_FATAL_CAPTURE
         bool "Capture fatal error context to NVS"
         default n

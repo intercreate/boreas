@@ -17,24 +17,37 @@
 
 #include <boreas/zephyr/kernel.h>
 #include <boreas/zsys/log.h>
+#include <esp_attr.h>
 
 LOG_MODULE_REGISTER(demo, LOG_LEVEL_INF);
 
 /* -------------------------------------------------------------------
  * Example 1: Periodic timer with expiry callback
+ *
+ * With CONFIG_K_TIMER_DISPATCH_ISR=y (default), the expiry callback
+ * runs in ISR context. Use k_work_submit to defer logging to a task.
  * ---------------------------------------------------------------- */
 
-static int heartbeat_count = 0;
+static atomic_t heartbeat_count = ATOMIC_INIT(0);
+static struct k_work heartbeat_log_work;
 
-static void heartbeat_expiry(struct k_timer *timer)
+static void heartbeat_log_handler(struct k_work *work)
 {
-	heartbeat_count++;
-	LOG_INF("[Timer] Heartbeat #%d", heartbeat_count);
+	ARG_UNUSED(work);
+	LOG_INF("[Timer] Heartbeat #%ld", atomic_get(&heartbeat_count));
+}
+
+static void IRAM_ATTR heartbeat_expiry(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	atomic_add(&heartbeat_count, 1);
+	k_work_submit(&heartbeat_log_work);
 }
 
 static void heartbeat_stop(struct k_timer *timer)
 {
-	LOG_INF("[Timer] Heartbeat stopped after %d beats", heartbeat_count);
+	ARG_UNUSED(timer);
+	LOG_INF("[Timer] Heartbeat stopped after %ld beats", atomic_get(&heartbeat_count));
 }
 
 static struct k_timer heartbeat_timer;
@@ -95,6 +108,7 @@ void app_main(void)
 
 	/* --- Example 1: Periodic timer --- */
 	LOG_INF("Starting heartbeat timer (every 1s, runs for 5s)...");
+	k_work_init(&heartbeat_log_work, heartbeat_log_handler);
 	k_timer_init(&heartbeat_timer, heartbeat_expiry, heartbeat_stop);
 	k_timer_start(&heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
 

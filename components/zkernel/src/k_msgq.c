@@ -7,7 +7,9 @@
 
 #include <errno.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "k_msgq";
 
@@ -24,7 +26,7 @@ int k_msgq_init(struct k_msgq *msgq, char *buffer, size_t msg_size, uint32_t max
 	return 0;
 }
 
-int k_msgq_put(struct k_msgq *msgq, const void *data, k_timeout_t timeout)
+int K_ISR_SAFE k_msgq_put(struct k_msgq *msgq, const void *data, k_timeout_t timeout)
 {
 	BaseType_t ret;
 

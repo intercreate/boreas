@@ -7,7 +7,9 @@
 
 #include <errno.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "k_event";
 
@@ -21,12 +23,12 @@ int k_event_init(struct k_event *event)
 	return 0;
 }
 
-uint32_t k_event_post(struct k_event *event, uint32_t events)
+uint32_t K_ISR_SAFE k_event_post(struct k_event *event, uint32_t events)
 {
 	return k_event_set(event, events);
 }
 
-uint32_t k_event_set(struct k_event *event, uint32_t events)
+uint32_t K_ISR_SAFE k_event_set(struct k_event *event, uint32_t events)
 {
 	if (xPortInIsrContext()) {
 		BaseType_t wake = pdFALSE;
@@ -40,7 +42,7 @@ uint32_t k_event_set(struct k_event *event, uint32_t events)
 	return (uint32_t)xEventGroupSetBits(event->handle, (EventBits_t)events);
 }
 
-uint32_t k_event_clear(struct k_event *event, uint32_t events)
+uint32_t K_ISR_SAFE k_event_clear(struct k_event *event, uint32_t events)
 {
 	if (xPortInIsrContext()) {
 		return (uint32_t)xEventGroupClearBitsFromISR(event->handle, (EventBits_t)events);

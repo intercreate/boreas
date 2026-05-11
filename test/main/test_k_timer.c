@@ -3,19 +3,28 @@
  * Copyright 2026 Intercreate
  */
 
+#include <stdint.h>
+
 #include "unity.h"
 #include "zephyr/kernel.h"
+#include "sdkconfig.h"
+
+#include "esp_attr.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 
 static volatile int timer_count;
 static volatile int stop_called;
 
-static void test_timer_cb(struct k_timer *timer)
+static void IRAM_ATTR test_timer_cb(struct k_timer *timer)
 {
+	ARG_UNUSED(timer);
 	timer_count++;
 }
 
 static void test_stop_cb(struct k_timer *timer)
 {
+	ARG_UNUSED(timer);
 	stop_called++;
 }
 
@@ -296,6 +305,140 @@ static void test_timer_first_interval(void)
 	k_timer_stop(&timer);
 }
 
+/* ----------------------------------------------------------------
+ * ISR dispatch tests (CONFIG_K_TIMER_DISPATCH_ISR)
+ * ---------------------------------------------------------------- */
+
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+
+static volatile bool isr_context_result;
+
+static void IRAM_ATTR isr_context_check_cb(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	isr_context_result = xPortInIsrContext();
+}
+
+static void test_timer_callback_in_isr_context(void)
+{
+	struct k_timer timer;
+	k_timer_init(&timer, isr_context_check_cb, NULL);
+	isr_context_result = false;
+
+	k_timer_start(&timer, K_MSEC(10), K_NO_WAIT);
+	k_msleep(100);
+	k_timer_stop(&timer);
+
+	TEST_ASSERT_TRUE_MESSAGE(isr_context_result, "Expiry callback did not run in ISR context");
+}
+
+extern int _iram_text_start;
+extern int _iram_text_end;
+
+static void test_timer_callback_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)isr_context_check_cb;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"IRAM_ATTR callback is not in IRAM address range");
+}
+
+static struct k_sem isr_test_sem;
+static struct k_work isr_test_work;
+static volatile bool isr_work_ran;
+
+static void IRAM_ATTR isr_safe_apis_cb(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	k_sem_give(&isr_test_sem);
+	k_work_submit(&isr_test_work);
+}
+
+static void isr_test_work_handler(struct k_work *work)
+{
+	isr_work_ran = true;
+}
+
+static void test_timer_isr_safe_apis(void)
+{
+	struct k_timer timer;
+
+	k_sem_init(&isr_test_sem, 0, 1);
+	k_work_init(&isr_test_work, isr_test_work_handler);
+	isr_work_ran = false;
+
+	k_timer_init(&timer, isr_safe_apis_cb, NULL);
+	k_timer_start(&timer, K_MSEC(10), K_NO_WAIT);
+
+	/* k_sem_take blocks until the ISR callback gives the sem. */
+	int ret = k_sem_take(&isr_test_sem, K_MSEC(500));
+	TEST_ASSERT_EQUAL_MESSAGE(0, ret, "k_sem_give from ISR did not wake waiter");
+
+	/* Give the work queue a moment to drain. */
+	k_msleep(50);
+	TEST_ASSERT_TRUE_MESSAGE(isr_work_ran, "k_work_submit from ISR did not run");
+
+	k_timer_stop(&timer);
+}
+
+static void test_k_work_submit_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_work_submit;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_work_submit is not in IRAM address range");
+}
+
+static void test_k_sem_give_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_sem_give;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_sem_give is not in IRAM address range");
+}
+
+static void test_k_event_set_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_event_set;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_event_set is not in IRAM address range");
+}
+
+static void test_k_event_post_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_event_post;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_event_post is not in IRAM address range");
+}
+
+static void test_k_event_clear_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_event_clear;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_event_clear is not in IRAM address range");
+}
+
+static void test_k_msgq_put_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_msgq_put;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_msgq_put is not in IRAM address range");
+}
+
+static void test_k_work_submit_to_queue_iram_attr(void)
+{
+	uintptr_t fn = (uintptr_t)k_work_submit_to_queue;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_work_submit_to_queue is not in IRAM address range");
+}
+
+#endif /* CONFIG_K_TIMER_DISPATCH_ISR */
+
 void test_k_timer_group(void)
 {
 	RUN_TEST(test_timer_one_shot);
@@ -311,4 +454,16 @@ void test_k_timer_group(void)
 	RUN_TEST(test_timer_remaining_ticks);
 	RUN_TEST(test_timer_expires_ticks);
 	RUN_TEST(test_timer_one_shot_clears_running);
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+	RUN_TEST(test_timer_callback_in_isr_context);
+	RUN_TEST(test_timer_callback_iram_attr);
+	RUN_TEST(test_timer_isr_safe_apis);
+	RUN_TEST(test_k_work_submit_iram_attr);
+	RUN_TEST(test_k_sem_give_iram_attr);
+	RUN_TEST(test_k_event_set_iram_attr);
+	RUN_TEST(test_k_event_post_iram_attr);
+	RUN_TEST(test_k_event_clear_iram_attr);
+	RUN_TEST(test_k_msgq_put_iram_attr);
+	RUN_TEST(test_k_work_submit_to_queue_iram_attr);
+#endif
 }
