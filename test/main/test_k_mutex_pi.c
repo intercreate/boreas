@@ -26,6 +26,9 @@
 #define PRIO_MEDIUM (configMAX_PRIORITIES - 4)
 #define PRIO_LOW    (configMAX_PRIORITIES - 6)
 
+#define LOCK_TIMEOUT_MS   100
+#define LOCK_TOLERANCE_MS 50
+
 /* -------------------------------------------------------------------
  * Test 1: Priority boost -- verify uxTaskPriorityGet reflects PI
  *
@@ -295,9 +298,6 @@ static void mutex_holder_entry(void *p1, void *p2, void *p3)
 		vTaskDelay(pdMS_TO_TICKS(100));
 	}
 }
-
-#define LOCK_TIMEOUT_MS   100
-#define LOCK_TOLERANCE_MS  50
 
 static void test_mutex_lock_timeout_under_contention(void)
 {

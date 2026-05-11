@@ -19,7 +19,7 @@
 /* Execution log: each init/shutdown function appends its tag here. */
 #define MAX_LOG 16
 static int exec_log[MAX_LOG];
-static volatile int exec_idx;
+static int exec_idx;
 
 static void log_tag(int tag)
 {
@@ -77,7 +77,7 @@ static int shutdown_early_10(void)
 	return 0;
 }
 
-static int shutdown_device_5(void)
+static int shutdown_device_6(void)
 {
 	log_tag(102);
 	return 0;
@@ -95,7 +95,7 @@ static int init_device_6_sd(void)
 	log_tag(12);
 	return 0;
 }
-SYS_INIT_WITH_SHUTDOWN(init_device_6_sd, shutdown_device_5, DEVICE, 6);
+SYS_INIT_WITH_SHUTDOWN(init_device_6_sd, shutdown_device_6, DEVICE, 6);
 
 /* -----------------------------------------------------------
  * Test 1: Multi-level ordering
@@ -121,12 +121,12 @@ static void test_init_ordering(void)
 	 *   APP     0  -> tag 4
 	 */
 	TEST_ASSERT_EQUAL(6, exec_idx);
-	TEST_ASSERT_EQUAL(1, exec_log[0]);   /* EARLY 10 */
-	TEST_ASSERT_EQUAL(11, exec_log[1]);  /* EARLY 11 */
-	TEST_ASSERT_EQUAL(2, exec_log[2]);   /* DEVICE 5 */
-	TEST_ASSERT_EQUAL(12, exec_log[3]);  /* DEVICE 6 (shutdown entry) */
-	TEST_ASSERT_EQUAL(3, exec_log[4]);   /* DEVICE 20 */
-	TEST_ASSERT_EQUAL(4, exec_log[5]);   /* APP 0 */
+	TEST_ASSERT_EQUAL(1, exec_log[0]);  /* EARLY 10 */
+	TEST_ASSERT_EQUAL(11, exec_log[1]); /* EARLY 11 */
+	TEST_ASSERT_EQUAL(2, exec_log[2]);  /* DEVICE 5 */
+	TEST_ASSERT_EQUAL(12, exec_log[3]); /* DEVICE 6 (shutdown entry) */
+	TEST_ASSERT_EQUAL(3, exec_log[4]);  /* DEVICE 20 */
+	TEST_ASSERT_EQUAL(4, exec_log[5]);  /* APP 0 */
 }
 
 /* -----------------------------------------------------------
@@ -148,10 +148,10 @@ static void test_shutdown_reverse(void)
 	sys_shutdown_run_all();
 
 	/* Only 2 entries have shutdown functions.
-	 * Init order was: EARLY 11 (tag 11), DEVICE 5 (tag 12).
-	 * Shutdown reverses: DEVICE 5 first, EARLY 11 second. */
+	 * Init order was: EARLY 11 (tag 11), DEVICE 6 (tag 12).
+	 * Shutdown reverses: DEVICE 6 first, EARLY 11 second. */
 	TEST_ASSERT_EQUAL(2, exec_idx);
-	TEST_ASSERT_EQUAL(102, exec_log[0]); /* shutdown_device_5 */
+	TEST_ASSERT_EQUAL(102, exec_log[0]); /* shutdown_device_6 */
 	TEST_ASSERT_EQUAL(101, exec_log[1]); /* shutdown_early_10 */
 }
 
@@ -173,12 +173,12 @@ static void test_init_failure_halts(void)
 
 	/* init_device_20 (tag 3) returns -1.
 	 * Entries before it should have run; init_app_0 (tag 4) should NOT. */
-	TEST_ASSERT_EQUAL(1, exec_log[0]);   /* EARLY 10 */
-	TEST_ASSERT_EQUAL(11, exec_log[1]);  /* EARLY 11 */
-	TEST_ASSERT_EQUAL(2, exec_log[2]);   /* DEVICE 5 */
-	TEST_ASSERT_EQUAL(12, exec_log[3]);  /* DEVICE 6 (shutdown entry) */
-	TEST_ASSERT_EQUAL(3, exec_log[4]);   /* DEVICE 20 — ran but failed */
-	TEST_ASSERT_EQUAL(5, exec_idx);      /* APP 0 did NOT run */
+	TEST_ASSERT_EQUAL(1, exec_log[0]);  /* EARLY 10 */
+	TEST_ASSERT_EQUAL(11, exec_log[1]); /* EARLY 11 */
+	TEST_ASSERT_EQUAL(2, exec_log[2]);  /* DEVICE 5 */
+	TEST_ASSERT_EQUAL(12, exec_log[3]); /* DEVICE 6 (shutdown entry) */
+	TEST_ASSERT_EQUAL(3, exec_log[4]);  /* DEVICE 20 — ran but failed */
+	TEST_ASSERT_EQUAL(5, exec_idx);     /* APP 0 did NOT run */
 }
 
 void test_init_group(void)
