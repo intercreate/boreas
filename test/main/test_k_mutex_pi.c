@@ -15,6 +15,7 @@
  *   (test runner is at priority 1 by default)
  */
 
+#include <errno.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -270,9 +271,66 @@ static void test_mutex_pi_prevents_inversion(void)
 	k_thread_abort(&pi3_high_thread);
 }
 
+/* -------------------------------------------------------------------
+ * Test 4: Lock with timeout under contention
+ *
+ * One thread holds the mutex indefinitely. Main thread attempts
+ * k_mutex_lock with a timeout and verifies -EAGAIN after the
+ * expected duration.
+ * ---------------------------------------------------------------- */
+
+static volatile int holder_ready;
+
+static void mutex_holder_entry(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct k_mutex *mtx = (struct k_mutex *)p1;
+
+	k_mutex_lock(mtx, K_FOREVER);
+	holder_ready = 1;
+
+	/* Hold until aborted */
+	while (1) {
+		vTaskDelay(pdMS_TO_TICKS(100));
+	}
+}
+
+#define LOCK_TIMEOUT_MS   100
+#define LOCK_TOLERANCE_MS  50
+
+static void test_mutex_lock_timeout_under_contention(void)
+{
+	K_THREAD_STACK_DEFINE(holder_stack, 4096);
+	struct k_thread holder_thread = {0};
+	struct k_mutex mtx;
+
+	k_mutex_init(&mtx);
+	holder_ready = 0;
+
+	k_thread_create(&holder_thread, holder_stack, K_THREAD_STACK_SIZEOF(holder_stack),
+			mutex_holder_entry, &mtx, NULL, NULL, 5, 0, K_NO_WAIT);
+
+	/* Wait for holder to grab the mutex */
+	while (!holder_ready) {
+		k_msleep(5);
+	}
+
+	int64_t start = k_uptime_get();
+	int ret = k_mutex_lock(&mtx, K_MSEC(LOCK_TIMEOUT_MS));
+	int64_t elapsed = k_uptime_get() - start;
+
+	TEST_ASSERT_EQUAL(-EAGAIN, ret);
+	TEST_ASSERT_GREATER_OR_EQUAL(LOCK_TIMEOUT_MS - LOCK_TOLERANCE_MS, elapsed);
+	TEST_ASSERT_LESS_OR_EQUAL(LOCK_TIMEOUT_MS + LOCK_TOLERANCE_MS, elapsed);
+
+	k_thread_abort(&holder_thread);
+}
+
 void test_k_mutex_pi_group(void)
 {
 	RUN_TEST(test_mutex_priority_boost);
 	RUN_TEST(test_mutex_priority_restore);
 	RUN_TEST(test_mutex_pi_prevents_inversion);
+	RUN_TEST(test_mutex_lock_timeout_under_contention);
 }

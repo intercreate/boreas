@@ -216,6 +216,68 @@ static void test_thread_deferred_delay(void)
 	k_thread_abort(&deferred_thread);
 }
 
+/* -----------------------------------------------------------
+ * Test: external suspend, resume, and k_current_get
+ *
+ * Spawns a thread that records k_current_get(). Main thread
+ * suspends it externally, verifies it stopped, resumes it,
+ * and checks that k_current_get() returned the correct handle.
+ * --------------------------------------------------------- */
+
+static volatile k_tid_t recorded_tid;
+static volatile int phases_completed;
+
+K_THREAD_STACK_DEFINE(suspend_test_stack, 4096);
+static struct k_thread suspend_test_thread;
+
+static void suspend_test_entry(void *p1, void *p2, void *p3)
+{
+	(void)p1;
+	(void)p2;
+	(void)p3;
+
+	recorded_tid = k_current_get();
+	phases_completed = 1;
+
+	/* Spin until externally suspended + resumed */
+	while (phases_completed < 2) {
+		k_msleep(10);
+	}
+
+	phases_completed = 3;
+	vTaskSuspend(NULL);
+}
+
+static void test_thread_suspend_resume_current_get(void)
+{
+	memset(&suspend_test_thread, 0, sizeof(suspend_test_thread));
+	recorded_tid = NULL;
+	phases_completed = 0;
+
+	k_tid_t tid = k_thread_create(&suspend_test_thread, suspend_test_stack,
+				      K_THREAD_STACK_SIZEOF(suspend_test_stack),
+				      suspend_test_entry, NULL, NULL, NULL, 5, 0, K_NO_WAIT);
+
+	/* Wait for thread to record its tid */
+	k_msleep(50);
+	TEST_ASSERT_EQUAL(1, phases_completed);
+	TEST_ASSERT_EQUAL_PTR(tid, recorded_tid);
+
+	/* External suspend */
+	k_thread_suspend(&suspend_test_thread);
+	int snapshot = phases_completed;
+	k_msleep(50);
+	TEST_ASSERT_EQUAL(snapshot, phases_completed);
+
+	/* Resume and signal the thread to advance */
+	phases_completed = 2;
+	k_thread_resume(&suspend_test_thread);
+	k_msleep(50);
+	TEST_ASSERT_EQUAL(3, phases_completed);
+
+	k_thread_abort(&suspend_test_thread);
+}
+
 void test_k_thread_group(void)
 {
 	RUN_TEST(test_thread_create_and_run);
@@ -226,4 +288,5 @@ void test_k_thread_group(void)
 	RUN_TEST(test_thread_three_params);
 	RUN_TEST(test_thread_deferred_forever);
 	RUN_TEST(test_thread_deferred_delay);
+	RUN_TEST(test_thread_suspend_resume_current_get);
 }

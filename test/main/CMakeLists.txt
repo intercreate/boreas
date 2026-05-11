@@ -27,6 +27,8 @@ if(NOT "${target}" STREQUAL "linux")
         "test_k_mutex_pi.c"
         "test_k_event_mt.c"
         "test_gpio_flags.c"
+        "test_k_msgq_mt.c"
+        "test_init.c"
     )
 endif()
 
