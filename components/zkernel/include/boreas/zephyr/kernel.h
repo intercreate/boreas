@@ -288,6 +288,10 @@ struct k_event {
 
 int k_event_init(struct k_event *event);
 uint32_t k_event_post(struct k_event *event, uint32_t events);
+/** @note In ISR context, returns 0 on failure (timer command queue full)
+ *        rather than the previous event state. FreeRTOS's
+ *        xEventGroupSetBitsFromISR defers to the timer daemon and cannot
+ *        report the prior bits synchronously. */
 uint32_t k_event_set(struct k_event *event, uint32_t events);
 uint32_t k_event_clear(struct k_event *event, uint32_t events);
 uint32_t k_event_wait(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout);
@@ -416,12 +420,12 @@ k_ticks_t k_timer_remaining_ticks(const struct k_timer *timer);
  */
 k_ticks_t k_timer_expires_ticks(const struct k_timer *timer);
 
-static inline void k_timer_user_data_set(struct k_timer *timer, void *user_data)
+static ALWAYS_INLINE void k_timer_user_data_set(struct k_timer *timer, void *user_data)
 {
 	timer->user_data = user_data;
 }
 
-static inline void *k_timer_user_data_get(const struct k_timer *timer)
+static ALWAYS_INLINE void *k_timer_user_data_get(const struct k_timer *timer)
 {
 	return timer->user_data;
 }
