@@ -49,7 +49,9 @@ static void supervisor_work_handler(struct k_work *work)
 static void K_ISR_SAFE supervisor_check(struct k_timer *timer)
 {
 	(void)timer;
-	k_work_submit(&supervisor_work);
+	if (k_work_submit(&supervisor_work) < 0) {
+		k_panic();
+	}
 }
 
 void zsys_watchdog_init(k_timeout_t check_interval, zsys_watchdog_timeout_cb_t timeout_cb)

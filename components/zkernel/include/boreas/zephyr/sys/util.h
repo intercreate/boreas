@@ -8,7 +8,6 @@
 #pragma once
 
 #include "esp_attr.h"
-#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {

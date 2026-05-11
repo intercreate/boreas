@@ -36,7 +36,7 @@ struct k_work_q k_sys_work_q;
 /* Branch-once helpers around portENTER/EXIT_CRITICAL: ESP-IDF needs
  * different macros for ISR vs task context. Inlined to avoid runtime
  * overhead in the common (task) case. */
-static inline void z_work_lock(struct k_work_q *queue)
+static ALWAYS_INLINE void z_work_lock(struct k_work_q *queue)
 {
 	if (xPortInIsrContext()) {
 		portENTER_CRITICAL_ISR(&queue->lock);
@@ -45,7 +45,7 @@ static inline void z_work_lock(struct k_work_q *queue)
 	}
 }
 
-static inline void z_work_unlock(struct k_work_q *queue)
+static ALWAYS_INLINE void z_work_unlock(struct k_work_q *queue)
 {
 	if (xPortInIsrContext()) {
 		portEXIT_CRITICAL_ISR(&queue->lock);
