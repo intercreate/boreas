@@ -38,7 +38,7 @@ DEVICE_DEFINE(gpio0, gpio_esp32_init, &gpio_esp32_api, NULL, NULL, NULL);
 static const struct gpio_dt_spec led_spec = {
 	.port = &gpio0,
 	.pin = BLINK_GPIO,
-	.dt_flags = 0, /* Active-high. Set GPIO_DT_ACTIVE_LOW for inverted LEDs */
+	.dt_flags = 0, /* Active-high. Set GPIO_ACTIVE_LOW for inverted LEDs */
 };
 
 /* -------------------------------------------------------------------
@@ -65,7 +65,7 @@ void app_main(void)
 	}
 
 	/* Configure the LED pin as output */
-	err = gpio_pin_configure_dt(&led_spec, GPIO_DT_OUTPUT);
+	err = gpio_pin_configure_dt(&led_spec, GPIO_OUTPUT);
 	if (err != ESP_OK) {
 		LOG_ERR("LED pin configure failed: %s", esp_err_to_name(err));
 		return;

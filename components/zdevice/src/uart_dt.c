@@ -126,12 +126,12 @@ static esp_err_t rs485_enable(const struct uart_esp32_config *cfg)
 		LOG_ERR("RS-485 SW mode requires rs485.de.port");
 		return ESP_ERR_INVALID_ARG;
 	}
-	err = gpio_pin_configure_dt(&cfg->rs485.de, GPIO_DT_OUTPUT);
+	err = gpio_pin_configure_dt(&cfg->rs485.de, GPIO_OUTPUT);
 	if (err != ESP_OK) {
 		return err;
 	}
 	if (cfg->rs485.re.port != NULL) {
-		err = gpio_pin_configure_dt(&cfg->rs485.re, GPIO_DT_OUTPUT);
+		err = gpio_pin_configure_dt(&cfg->rs485.re, GPIO_OUTPUT);
 		if (err != ESP_OK) {
 			return err;
 		}
