@@ -68,7 +68,7 @@ static void drainer_entry(void *p1, void *p2, void *p3)
 	k_msleep(50);
 
 	uint32_t tmp;
-	k_msgq_get(q, &tmp, K_NO_WAIT);
+	TEST_ASSERT_EQUAL(0, k_msgq_get(q, &tmp, K_NO_WAIT));
 
 	vTaskSuspend(NULL);
 }
@@ -81,6 +81,7 @@ static void test_msgq_put_unblocks_on_drain(void)
 	for (uint32_t i = 0; i < MSGQ_DEPTH; i++) {
 		TEST_ASSERT_EQUAL(0, k_msgq_put(&test_msgq, &i, K_NO_WAIT));
 	}
+	TEST_ASSERT_EQUAL(0, k_msgq_num_free_get(&test_msgq));
 
 	/* Spawn consumer that drains one slot after 50ms */
 	memset(&drainer_thread, 0, sizeof(drainer_thread));

@@ -71,7 +71,7 @@ SYS_INIT(init_app_0, APPLICATION, 0);
 
 /* Shutdown entries for the reverse-order test. */
 
-static int shutdown_early_10(void)
+static int shutdown_early_11(void)
 {
 	log_tag(101);
 	return 0;
@@ -83,12 +83,12 @@ static int shutdown_device_6(void)
 	return 0;
 }
 
-static int init_early_10_sd(void)
+static int init_early_11_sd(void)
 {
 	log_tag(11);
 	return 0;
 }
-SYS_INIT_WITH_SHUTDOWN(init_early_10_sd, shutdown_early_10, EARLY, 11);
+SYS_INIT_WITH_SHUTDOWN(init_early_11_sd, shutdown_early_11, EARLY, 11);
 
 static int init_device_6_sd(void)
 {
@@ -152,7 +152,7 @@ static void test_shutdown_reverse(void)
 	 * Shutdown reverses: DEVICE 6 first, EARLY 11 second. */
 	TEST_ASSERT_EQUAL(2, exec_idx);
 	TEST_ASSERT_EQUAL(102, exec_log[0]); /* shutdown_device_6 */
-	TEST_ASSERT_EQUAL(101, exec_log[1]); /* shutdown_early_10 */
+	TEST_ASSERT_EQUAL(101, exec_log[1]); /* shutdown_early_11 */
 }
 
 /* -----------------------------------------------------------
