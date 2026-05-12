@@ -283,6 +283,7 @@ static void test_mutex_pi_prevents_inversion(void)
  * ---------------------------------------------------------------- */
 
 static volatile int holder_ready;
+static volatile int holder_release;
 
 static void mutex_holder_entry(void *p1, void *p2, void *p3)
 {
@@ -293,10 +294,13 @@ static void mutex_holder_entry(void *p1, void *p2, void *p3)
 	k_mutex_lock(mtx, K_FOREVER);
 	holder_ready = 1;
 
-	/* Hold until aborted */
-	while (1) {
-		k_msleep(100);
+	/* Hold until signaled to release */
+	while (!holder_release) {
+		k_msleep(10);
 	}
+
+	k_mutex_unlock(mtx);
+	vTaskSuspend(NULL);
 }
 
 static void test_mutex_lock_timeout_under_contention(void)
@@ -307,6 +311,7 @@ static void test_mutex_lock_timeout_under_contention(void)
 
 	k_mutex_init(&mtx);
 	holder_ready = 0;
+	holder_release = 0;
 
 	k_thread_create(&holder_thread, holder_stack, K_THREAD_STACK_SIZEOF(holder_stack),
 			mutex_holder_entry, &mtx, NULL, NULL, 5, 0, K_NO_WAIT);
@@ -326,6 +331,9 @@ static void test_mutex_lock_timeout_under_contention(void)
 	TEST_ASSERT_GREATER_OR_EQUAL(LOCK_TIMEOUT_MS - LOCK_TOLERANCE_MS, elapsed);
 	TEST_ASSERT_LESS_OR_EQUAL(LOCK_TIMEOUT_MS + LOCK_TOLERANCE_MS, elapsed);
 
+	/* Signal holder to unlock cleanly before abort */
+	holder_release = 1;
+	k_msleep(50);
 	k_thread_abort(&holder_thread);
 }
 
