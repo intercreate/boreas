@@ -232,6 +232,7 @@ static void test_gpio_set_dt_no_invert_active_high(void)
 
 static void test_gpio_get_dt_inverts_for_active_low(void)
 {
+	reset_mock();
 	const struct gpio_dt_spec spec = {
 		.port = &mock_gpio, .pin = 4, .dt_flags = GPIO_ACTIVE_LOW};
 

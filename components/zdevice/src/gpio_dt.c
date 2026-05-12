@@ -55,10 +55,16 @@ static esp_err_t gpio_esp32_pin_configure(const struct device *port, gpio_num_t 
 	 * a glitch. gpio_set_level writes the output register while the
 	 * pin is still in its previous mode (typically input/hi-z). */
 	if (flags & GPIO_OUTPUT) {
+		esp_err_t ret;
 		if (flags & GPIO_OUTPUT_INIT_HIGH) {
-			gpio_set_level(pin, 1);
+			ret = gpio_set_level(pin, 1);
 		} else if (flags & GPIO_OUTPUT_INIT_LOW) {
-			gpio_set_level(pin, 0);
+			ret = gpio_set_level(pin, 0);
+		} else {
+			ret = ESP_OK;
+		}
+		if (ret != ESP_OK) {
+			return ret;
 		}
 	}
 
