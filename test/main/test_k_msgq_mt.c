@@ -58,6 +58,7 @@ static void test_msgq_put_timeout_on_full(void)
 
 K_THREAD_STACK_DEFINE(drainer_stack, 2048);
 static struct k_thread drainer_thread;
+static volatile int drainer_get_ret;
 
 static void drainer_entry(void *p1, void *p2, void *p3)
 {
@@ -68,7 +69,7 @@ static void drainer_entry(void *p1, void *p2, void *p3)
 	k_msleep(50);
 
 	uint32_t tmp;
-	TEST_ASSERT_EQUAL(0, k_msgq_get(q, &tmp, K_NO_WAIT));
+	drainer_get_ret = k_msgq_get(q, &tmp, K_NO_WAIT);
 
 	vTaskSuspend(NULL);
 }
@@ -84,6 +85,7 @@ static void test_msgq_put_unblocks_on_drain(void)
 	TEST_ASSERT_EQUAL(0, k_msgq_num_free_get(&test_msgq));
 
 	/* Spawn consumer that drains one slot after 50ms */
+	drainer_get_ret = -1;
 	memset(&drainer_thread, 0, sizeof(drainer_thread));
 	k_thread_create(&drainer_thread, drainer_stack, K_THREAD_STACK_SIZEOF(drainer_stack),
 			drainer_entry, &test_msgq, NULL, NULL, 5, 0, K_NO_WAIT);
@@ -97,6 +99,7 @@ static void test_msgq_put_unblocks_on_drain(void)
 	TEST_ASSERT_EQUAL(0, ret);
 	/* Should have unblocked around 50ms, well before the 500ms timeout */
 	TEST_ASSERT_LESS_THAN(200, elapsed);
+	TEST_ASSERT_EQUAL(0, drainer_get_ret);
 
 	k_thread_abort(&drainer_thread);
 }
