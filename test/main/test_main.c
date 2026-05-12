@@ -38,6 +38,8 @@ void test_k_thread_group(void);
 void test_k_mutex_pi_group(void);
 void test_k_event_mt_group(void);
 void test_gpio_flags_group(void);
+void test_init_group(void);
+void test_k_msgq_mt_group(void);
 #endif
 
 void app_main(void)
@@ -82,6 +84,12 @@ void app_main(void)
 
 	/* Multi-thread event tests */
 	test_k_event_mt_group();
+
+	/* Multi-thread msgq tests */
+	test_k_msgq_mt_group();
+
+	/* SYS_INIT ordering tests */
+	test_init_group();
 
 	/* Layer 2: Timer & Work Queue */
 	test_k_timer_group();
