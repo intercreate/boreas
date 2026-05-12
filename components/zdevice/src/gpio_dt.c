@@ -50,12 +50,24 @@ static void IRAM_ATTR gpio_esp32_isr(void *arg)
 static esp_err_t gpio_esp32_pin_configure(const struct device *port, gpio_num_t pin, uint32_t flags)
 {
 	(void)port;
+
+	/* Set output level BEFORE enabling the output driver to avoid
+	 * a glitch. gpio_set_level writes the output register while the
+	 * pin is still in its previous mode (typically input/hi-z). */
+	if (flags & GPIO_OUTPUT) {
+		if (flags & GPIO_OUTPUT_INIT_HIGH) {
+			gpio_set_level(pin, 1);
+		} else if (flags & GPIO_OUTPUT_INIT_LOW) {
+			gpio_set_level(pin, 0);
+		}
+	}
+
 	gpio_config_t io_conf = {
 		.pin_bit_mask = (1ULL << pin),
-		.mode = (flags & GPIO_DT_OUTPUT) ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_INPUT,
-		.pull_up_en = (flags & GPIO_DT_PULL_UP) ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+		.mode = (flags & GPIO_OUTPUT) ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_INPUT,
+		.pull_up_en = (flags & GPIO_PULL_UP) ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
 		.pull_down_en =
-			(flags & GPIO_DT_PULL_DOWN) ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
+			(flags & GPIO_PULL_DOWN) ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
 		.intr_type = GPIO_INTR_DISABLE,
 	};
 	return gpio_config(&io_conf);

@@ -12,25 +12,38 @@
 #include "esp_log.h"
 #include "zephyr/sys/util.h"
 
-/* Bits 0-7: dt_flags -- board-level properties, stored in gpio_dt_spec.dt_flags (uint8_t) */
-#define GPIO_DT_ACTIVE_LOW  BIT(0)
-#define GPIO_DT_OPEN_DRAIN  BIT(1) /* reserved */
-#define GPIO_DT_OPEN_SOURCE BIT(2) /* reserved */
-/* bits 3-7 reserved for future dt properties */
+/* Bits 0-7: dt_flags — board-level properties (uint8_t in gpio_dt_spec).
+ * Bit positions match upstream Zephyr dt-bindings/gpio/gpio.h. */
+#define GPIO_ACTIVE_LOW  BIT(0)
+#define GPIO_OPEN_DRAIN  BIT(1) /* reserved */
+#define GPIO_OPEN_SOURCE BIT(2) /* reserved */
+#define GPIO_PULL_UP     BIT(4)
+#define GPIO_PULL_DOWN   BIT(5)
 
-/* Bits 8-11: configure-time flags -- passed to gpio_pin_configure_dt() at runtime */
-#define GPIO_DT_INPUT     BIT(8)
-#define GPIO_DT_OUTPUT    BIT(9)
-#define GPIO_DT_PULL_UP   BIT(10)
-#define GPIO_DT_PULL_DOWN BIT(11)
+/* Bits 16-20: configure-time direction & output-init flags.
+ * Bit positions match upstream Zephyr include/zephyr/drivers/gpio.h. */
+#define GPIO_INPUT               BIT(16)
+#define GPIO_OUTPUT              BIT(17)
+#define GPIO_OUTPUT_INIT_LOW     BIT(18)
+#define GPIO_OUTPUT_INIT_HIGH    BIT(19)
+#define GPIO_OUTPUT_INIT_LOGICAL BIT(20)
 
-/* Bits 13-16: interrupt trigger flags (Zephyr-compatible decomposition).
- * Passed to gpio_pin_interrupt_configure_dt(). */
+/** Configure as output, initial physical low. */
+#define GPIO_OUTPUT_LOW      (GPIO_OUTPUT | GPIO_OUTPUT_INIT_LOW)
+/** Configure as output, initial physical high. */
+#define GPIO_OUTPUT_HIGH     (GPIO_OUTPUT | GPIO_OUTPUT_INIT_HIGH)
+/** Configure as output, initial logical inactive (respects active-low). */
+#define GPIO_OUTPUT_INACTIVE (GPIO_OUTPUT | GPIO_OUTPUT_INIT_LOW | GPIO_OUTPUT_INIT_LOGICAL)
+/** Configure as output, initial logical active (respects active-low). */
+#define GPIO_OUTPUT_ACTIVE   (GPIO_OUTPUT | GPIO_OUTPUT_INIT_HIGH | GPIO_OUTPUT_INIT_LOGICAL)
+
+/* Bits 21-24: interrupt trigger flags.
+ * Bit positions match upstream Zephyr include/zephyr/drivers/gpio.h. */
 #define GPIO_INT_DISABLE 0
-#define GPIO_INT_ENABLE  BIT(13)
-#define GPIO_INT_EDGE    BIT(14)
-#define GPIO_INT_LOW_0   BIT(15)
-#define GPIO_INT_HIGH_1  BIT(16)
+#define GPIO_INT_ENABLE  BIT(21)
+#define GPIO_INT_EDGE    BIT(22)
+#define GPIO_INT_LOW_0   BIT(23)
+#define GPIO_INT_HIGH_1  BIT(24)
 
 #define GPIO_INT_EDGE_RISING  (GPIO_INT_ENABLE | GPIO_INT_EDGE | GPIO_INT_HIGH_1)
 #define GPIO_INT_EDGE_FALLING (GPIO_INT_ENABLE | GPIO_INT_EDGE | GPIO_INT_LOW_0)
@@ -107,8 +120,22 @@ static inline esp_err_t gpio_pin_configure_dt(const struct gpio_dt_spec *spec, u
 	__ASSERT(spec != NULL, "gpio_pin_configure_dt: NULL spec");
 	__ASSERT(device_is_ready(spec->port), "gpio_pin_configure_dt: port not ready");
 	const struct gpio_api *api = spec->port->api;
-	return api->pin_configure(spec->port, spec->pin,
-				  (spec->dt_flags & ~GPIO_DT_ACTIVE_LOW) | extra_flags);
+	uint32_t flags = (spec->dt_flags & ~GPIO_ACTIVE_LOW) | extra_flags;
+
+	__ASSERT(!((flags & GPIO_OUTPUT_INIT_LOW) && (flags & GPIO_OUTPUT_INIT_HIGH)),
+		 "GPIO_OUTPUT_INIT_LOW and GPIO_OUTPUT_INIT_HIGH are mutually exclusive");
+
+	/* Logical init: when GPIO_OUTPUT_INIT_LOGICAL is set and the pin is
+	 * active-low, swap INIT_LOW ↔ INIT_HIGH so the driver sees the
+	 * correct physical level. Matches upstream Zephyr z_impl_gpio_pin_configure. */
+	if ((flags & GPIO_OUTPUT_INIT_LOGICAL) &&
+	    (flags & (GPIO_OUTPUT_INIT_LOW | GPIO_OUTPUT_INIT_HIGH)) &&
+	    (spec->dt_flags & GPIO_ACTIVE_LOW)) {
+		flags ^= GPIO_OUTPUT_INIT_LOW | GPIO_OUTPUT_INIT_HIGH;
+	}
+	flags &= ~GPIO_OUTPUT_INIT_LOGICAL;
+
+	return api->pin_configure(spec->port, spec->pin, flags);
 }
 
 static inline esp_err_t gpio_pin_set_dt(const struct gpio_dt_spec *spec, int value)
@@ -116,7 +143,7 @@ static inline esp_err_t gpio_pin_set_dt(const struct gpio_dt_spec *spec, int val
 	__ASSERT(spec != NULL, "gpio_pin_set_dt: NULL spec");
 	__ASSERT(device_is_ready(spec->port), "gpio_pin_set_dt: port not ready");
 	const struct gpio_api *api = spec->port->api;
-	if (spec->dt_flags & GPIO_DT_ACTIVE_LOW) {
+	if (spec->dt_flags & GPIO_ACTIVE_LOW) {
 		value = !value;
 	}
 	return api->pin_set_raw(spec->port, spec->pin, value);
@@ -131,7 +158,7 @@ static inline int gpio_pin_get_dt(const struct gpio_dt_spec *spec)
 	if (raw < 0) {
 		return raw;
 	}
-	return (spec->dt_flags & GPIO_DT_ACTIVE_LOW) ? !raw : raw;
+	return (spec->dt_flags & GPIO_ACTIVE_LOW) ? !raw : raw;
 }
 
 static inline esp_err_t gpio_pin_toggle_dt(const struct gpio_dt_spec *spec)
