@@ -37,6 +37,7 @@ void test_k_work_group(void);
 void test_k_thread_group(void);
 void test_k_mutex_pi_group(void);
 void test_k_event_mt_group(void);
+void test_gpio_flags_group(void);
 #endif
 
 void app_main(void)
@@ -85,6 +86,9 @@ void app_main(void)
 	/* Layer 2: Timer & Work Queue */
 	test_k_timer_group();
 	test_k_work_group();
+
+	/* GPIO flag logic */
+	test_gpio_flags_group();
 #endif
 
 #if CONFIG_IDF_TARGET_LINUX
