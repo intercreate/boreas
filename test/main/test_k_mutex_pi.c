@@ -295,7 +295,7 @@ static void mutex_holder_entry(void *p1, void *p2, void *p3)
 
 	/* Hold until aborted */
 	while (1) {
-		vTaskDelay(pdMS_TO_TICKS(100));
+		k_msleep(100);
 	}
 }
 
@@ -312,7 +312,9 @@ static void test_mutex_lock_timeout_under_contention(void)
 			mutex_holder_entry, &mtx, NULL, NULL, 5, 0, K_NO_WAIT);
 
 	/* Wait for holder to grab the mutex */
+	int64_t deadline = k_uptime_get() + 1000;
 	while (!holder_ready) {
+		TEST_ASSERT_LESS_THAN(deadline, k_uptime_get());
 		k_msleep(5);
 	}
 
