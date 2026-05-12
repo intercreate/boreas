@@ -98,10 +98,10 @@ extern "C" {
 #define __weak __attribute__((__weak__))
 #endif
 
-/* Always inline */
-#ifndef ALWAYS_INLINE
+/* Always inline — undef any prior definition to guarantee `inline` is present
+ * (RISC-V GCC errors without it under -Werror=attributes). */
+#undef ALWAYS_INLINE
 #define ALWAYS_INLINE __attribute__((always_inline)) inline
-#endif
 
 /* Runtime assertion -- logs and aborts.
  * NOT safe from IRAM ISR context (ESP_LOGE + abort are flash-resident).
