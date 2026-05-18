@@ -629,6 +629,8 @@ int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay);
 int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 			      k_timeout_t delay);
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay);
+int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
+				k_timeout_t delay);
 int k_work_cancel_delayable(struct k_work_delayable *dwork);
 bool k_work_delayable_is_pending(struct k_work_delayable *dwork);
 int64_t k_work_delayable_remaining_get(struct k_work_delayable *dwork);
