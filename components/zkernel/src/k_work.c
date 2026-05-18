@@ -368,10 +368,17 @@ int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *d
 
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay)
 {
+	return k_work_reschedule_for_queue(&k_sys_work_q, dwork, delay);
+}
+
+int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
+				k_timeout_t delay)
+{
 	k_work_cancel_delayable(dwork);
+	dwork->queue = queue;
 
 	if (k_timeout_is_no_wait(delay)) {
-		return k_work_submit(&dwork->work);
+		return k_work_submit_to_queue(queue, &dwork->work);
 	}
 
 	k_timer_start(&dwork->timer, delay, K_NO_WAIT);
