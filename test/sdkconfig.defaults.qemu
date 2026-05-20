@@ -1,0 +1,2 @@
+# QEMU overrides: esp_timer ISR dispatch is not emulated.
+CONFIG_K_TIMER_DISPATCH_ISR=n
