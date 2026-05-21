@@ -625,10 +625,18 @@ struct k_work_delayable {
 	}
 
 void k_work_init_delayable(struct k_work_delayable *dwork, k_work_handler_t handler);
+/** @note Boreas returns 0 on success; upstream Zephyr returns 1 (newly scheduled)
+ * or 2 (running, requeued). Negative errno values are not returned. */
 int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay);
+/** @note Boreas returns 0 on success; upstream Zephyr returns 1 (newly scheduled)
+ * or 2 (running, requeued). Negative errno values are not returned. */
 int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 			      k_timeout_t delay);
+/** @note Boreas returns 0 on success; upstream Zephyr returns 1 (newly scheduled)
+ * or 2 (running, requeued). Negative errno values are not returned. */
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay);
+/** @note Boreas returns 0 on success; upstream Zephyr returns 1 (newly scheduled)
+ * or 2 (running, requeued). Negative errno values are not returned. */
 int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 				k_timeout_t delay);
 int k_work_cancel_delayable(struct k_work_delayable *dwork);

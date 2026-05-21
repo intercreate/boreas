@@ -377,6 +377,10 @@ static void test_work_reschedule_for_queue(void)
 
 	k_msleep(200);
 	TEST_ASSERT_EQUAL(1, custom_q_executed);
+
+	/* Wait past the original 500ms deadline to confirm it was cancelled */
+	k_msleep(400);
+	TEST_ASSERT_EQUAL(1, custom_q_executed);
 }
 
 static volatile int race_executed;
