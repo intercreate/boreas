@@ -93,7 +93,6 @@ static inline void gpio_init_callback(struct gpio_callback *cb, gpio_callback_ha
 	__ASSERT(cb != NULL, "gpio_init_callback: NULL cb");
 	cb->handler = handler;
 	cb->pin_mask = pin_mask;
-	cb->node.next = NULL;
 }
 
 static inline esp_err_t gpio_add_callback(const struct device *port, struct gpio_callback *cb)

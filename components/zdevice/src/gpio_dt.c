@@ -156,18 +156,9 @@ static esp_err_t gpio_esp32_manage_callback(const struct device *port, struct gp
 
 	portENTER_CRITICAL(&gpio0_data.lock);
 
+	sys_slist_find_and_remove(&gpio0_data.callbacks, &cb->node);
 	if (set) {
-		/* Deduplicate before inserting */
-		sys_snode_t *cur;
-		SYS_SLIST_FOR_EACH_NODE(&gpio0_data.callbacks, cur) {
-			if (cur == &cb->node) {
-				portEXIT_CRITICAL(&gpio0_data.lock);
-				return ESP_OK;
-			}
-		}
 		sys_slist_prepend(&gpio0_data.callbacks, &cb->node);
-	} else {
-		sys_slist_find_and_remove(&gpio0_data.callbacks, &cb->node);
 	}
 
 	portEXIT_CRITICAL(&gpio0_data.lock);
