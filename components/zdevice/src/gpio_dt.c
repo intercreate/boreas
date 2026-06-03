@@ -9,12 +9,12 @@ LOG_MODULE_REGISTER(gpio_esp32, LOG_LEVEL_INF);
  * ---------------------------------------------------------------- */
 
 struct gpio_esp32_data {
-	struct gpio_callback *callbacks; /* singly-linked list head */
-	portMUX_TYPE lock;               /* protects callback list */
+	sys_slist_t callbacks;
+	portMUX_TYPE lock; /* protects callback list */
 };
 
 static struct gpio_esp32_data gpio0_data = {
-	.callbacks = NULL,
+	.callbacks = SYS_SLIST_STATIC_INIT(&gpio0_data.callbacks),
 	.lock = portMUX_INITIALIZER_UNLOCKED,
 };
 
@@ -34,12 +34,11 @@ static void IRAM_ATTR gpio_esp32_isr(void *arg)
 
 	/* Walk callback list -- no lock needed in ISR because list mutations
 	 * happen under portENTER_CRITICAL which masks interrupts on this core */
-	struct gpio_callback *cb = gpio0_data.callbacks;
-	while (cb != NULL) {
+	struct gpio_callback *cb;
+	SYS_SLIST_FOR_EACH_CONTAINER(&gpio0_data.callbacks, cb, node) {
 		if (cb->pin_mask & pin_bit) {
 			cb->handler(gpio_esp32_port, cb, pin_bit);
 		}
-		cb = cb->next;
 	}
 }
 
@@ -157,29 +156,9 @@ static esp_err_t gpio_esp32_manage_callback(const struct device *port, struct gp
 
 	portENTER_CRITICAL(&gpio0_data.lock);
 
+	sys_slist_find_and_remove(&gpio0_data.callbacks, &cb->node);
 	if (set) {
-		/* Add to head of list (check for duplicates) */
-		struct gpio_callback *cur = gpio0_data.callbacks;
-		while (cur != NULL) {
-			if (cur == cb) {
-				portEXIT_CRITICAL(&gpio0_data.lock);
-				return ESP_OK; /* already registered */
-			}
-			cur = cur->next;
-		}
-		cb->next = gpio0_data.callbacks;
-		gpio0_data.callbacks = cb;
-	} else {
-		/* Remove from list */
-		struct gpio_callback **pp = &gpio0_data.callbacks;
-		while (*pp != NULL) {
-			if (*pp == cb) {
-				*pp = cb->next;
-				cb->next = NULL;
-				break;
-			}
-			pp = &(*pp)->next;
-		}
+		sys_slist_prepend(&gpio0_data.callbacks, &cb->node);
 	}
 
 	portEXIT_CRITICAL(&gpio0_data.lock);
