@@ -10,6 +10,7 @@
 #include "device_model.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "zephyr/sys/slist.h"
 #include "zephyr/sys/util.h"
 
 /* Bits 0-7: dt_flags — board-level properties (uint8_t in gpio_dt_spec).
@@ -61,7 +62,7 @@ typedef void (*gpio_callback_handler_t)(const struct device *port, struct gpio_c
 					gpio_port_pins_t pins);
 
 struct gpio_callback {
-	struct gpio_callback *next; /* singly-linked list (internal) */
+	sys_snode_t node;
 	gpio_callback_handler_t handler;
 	gpio_port_pins_t pin_mask;
 };
@@ -92,7 +93,6 @@ static inline void gpio_init_callback(struct gpio_callback *cb, gpio_callback_ha
 	__ASSERT(cb != NULL, "gpio_init_callback: NULL cb");
 	cb->handler = handler;
 	cb->pin_mask = pin_mask;
-	cb->next = NULL;
 }
 
 static inline esp_err_t gpio_add_callback(const struct device *port, struct gpio_callback *cb)

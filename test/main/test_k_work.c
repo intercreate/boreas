@@ -364,6 +364,36 @@ static void test_work_schedule_for_queue(void)
 	TEST_ASSERT_EQUAL(1, custom_q_executed);
 }
 
+static volatile TaskHandle_t reschedule_ran_on;
+
+static void reschedule_queue_handler(struct k_work *work)
+{
+	(void)work;
+	reschedule_ran_on = xTaskGetCurrentTaskHandle();
+	custom_q_executed++;
+}
+
+static void test_work_reschedule_for_queue(void)
+{
+	struct k_work_delayable dwork;
+	k_work_init_delayable(&dwork, reschedule_queue_handler);
+	custom_q_executed = 0;
+	reschedule_ran_on = NULL;
+
+	/* Schedule on system queue for 500ms, then reschedule onto custom queue at 50ms */
+	k_work_schedule(&dwork, K_MSEC(500));
+	k_msleep(10);
+	k_work_reschedule_for_queue(&custom_wq, &dwork, K_MSEC(50));
+
+	k_msleep(200);
+	TEST_ASSERT_EQUAL(1, custom_q_executed);
+	TEST_ASSERT_EQUAL(custom_wq.thread, reschedule_ran_on);
+
+	/* Wait past the original 500ms deadline to confirm it was cancelled */
+	k_msleep(400);
+	TEST_ASSERT_EQUAL(1, custom_q_executed);
+}
+
 static volatile int race_executed;
 
 static void race_handler(struct k_work *work)
@@ -478,6 +508,7 @@ void test_k_work_group(void)
 	RUN_TEST(test_work_submit_from_timer_callback);
 	RUN_TEST(test_work_custom_queue_with_cfg);
 	RUN_TEST(test_work_schedule_for_queue);
+	RUN_TEST(test_work_reschedule_for_queue);
 	RUN_TEST(test_work_submit_cancel_race);
 	RUN_TEST(test_work_init_macro_static);
 	RUN_TEST(test_work_flush_unblocked_by_cancel);
