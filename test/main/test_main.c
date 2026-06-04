@@ -28,18 +28,20 @@ void test_device_registry_group(void);
 void test_shell_group(void);
 #endif
 
-/* These require esp_timer / real HW -- not available on linux target */
-#if !CONFIG_IDF_TARGET_LINUX
 void test_uptime_group(void);
 void test_sleep_group(void);
 void test_k_timer_group(void);
 void test_k_work_group(void);
-void test_k_thread_group(void);
 void test_k_mutex_pi_group(void);
 void test_k_event_mt_group(void);
-void test_gpio_flags_group(void);
 void test_init_group(void);
 void test_k_msgq_mt_group(void);
+
+#if !CONFIG_IDF_TARGET_LINUX
+/* k_thread group skipped on linux (POSIX-port lifecycle bug, see app_main).
+ * gpio_flags requires zdevice GPIO types (driver component). */
+void test_k_thread_group(void);
+void test_gpio_flags_group(void);
 #endif
 
 void app_main(void)
@@ -71,13 +73,31 @@ void app_main(void)
 	test_shell_group();
 #endif
 
-#if !CONFIG_IDF_TARGET_LINUX
-	/* Layer 0: Uptime & Sleep (need esp_timer) */
+	/* Layer 0: Uptime & Sleep */
 	test_uptime_group();
 	test_sleep_group();
 
-	/* Layer 1: Thread */
+	/* Layer 2: Timer & Work Queue (before the thread-heavy groups so a
+	 * linux-port thread-lifecycle failure can't mask timer/work results) */
+	test_k_timer_group();
+	test_k_work_group();
+
+#if !CONFIG_IDF_TARGET_LINUX
+	/* Layer 1: Thread.
+	 *
+	 * SKIPPED ON LINUX: k_thread create/abort corrupts the FreeRTOS
+	 * POSIX port. vTaskDelete defers pthread teardown to the idle task
+	 * (portCLEAN_UP_TCB -> vPortCancelThread), which dereferences the
+	 * TCB and the port Thread_t stored inside the task's stack buffer
+	 * -- but these tests keep both in function-local storage, and the
+	 * cancelled pthreads are never reaped (cancellation appears
+	 * undeliverable while the port parks threads with all signals
+	 * blocked, at least on macOS hosts). Net effect: dangling TCB list
+	 * nodes get written into dead stack frames and a later task create
+	 * returns through a smashed LR (crash lands at deferred_thread+16,
+	 * the TCB's xStateListItem). */
 	test_k_thread_group();
+#endif
 
 	/* Mutex priority inheritance (needs real scheduling) */
 	test_k_mutex_pi_group();
@@ -88,14 +108,16 @@ void app_main(void)
 	/* Multi-thread msgq tests */
 	test_k_msgq_mt_group();
 
-	/* SYS_INIT ordering tests */
+#if !CONFIG_IDF_TARGET_LINUX
+	/* SYS_INIT ordering tests.
+	 * SKIPPED ON LINUX: SYS_INIT registration (constructor/linker-
+	 * section based) does not fire in the host binary -- "No SYS_INIT
+	 * entries registered" (Mach-O hosts at minimum). */
 	test_init_group();
+#endif
 
-	/* Layer 2: Timer & Work Queue */
-	test_k_timer_group();
-	test_k_work_group();
-
-	/* GPIO flag logic */
+#if !CONFIG_IDF_TARGET_LINUX
+	/* GPIO flag logic (needs zdevice GPIO types) */
 	test_gpio_flags_group();
 #endif
 

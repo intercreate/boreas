@@ -14,22 +14,23 @@ set(test_srcs
     "test_device_registry.c"
 )
 
+list(APPEND test_srcs
+    "test_k_timer.c"
+    "test_k_work.c"
+    "test_uptime.c"
+    "test_sleep.c"
+    "test_k_thread.c"
+    "test_k_mutex_pi.c"
+    "test_k_event_mt.c"
+    "test_k_msgq_mt.c"
+    "test_init.c"
+)
+
 idf_build_get_property(target IDF_TARGET)
 
 if(NOT "${target}" STREQUAL "linux")
-    # These require esp_timer (no linux impl)
-    list(APPEND test_srcs
-        "test_k_timer.c"
-        "test_k_work.c"
-        "test_uptime.c"
-        "test_sleep.c"
-        "test_k_thread.c"
-        "test_k_mutex_pi.c"
-        "test_k_event_mt.c"
-        "test_gpio_flags.c"
-        "test_k_msgq_mt.c"
-        "test_init.c"
-    )
+    # Needs zdevice GPIO types (driver component) -- not available on linux
+    list(APPEND test_srcs "test_gpio_flags.c")
 endif()
 
 if(CONFIG_ZSHELL)

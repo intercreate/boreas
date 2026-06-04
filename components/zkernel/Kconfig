@@ -65,6 +65,7 @@ menu "Boreas Kernel (zkernel)"
 
     config K_TIMER_DISPATCH_ISR
         bool "Dispatch k_timer callbacks in ISR context"
+        depends on !IDF_TARGET_LINUX
         default y
         select ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
         help
@@ -75,6 +76,29 @@ menu "Boreas Kernel (zkernel)"
             When disabled, callbacks run on the ESP_TIMER_TASK (a normal
             FreeRTOS task). Blocking calls are permitted but the behavior
             diverges from upstream Zephyr.
+
+            Unavailable on the linux target: esp_timer is headers-only
+            there, and the k_timer linux backend dispatches from a
+            dedicated FreeRTOS task (task-context semantics).
+
+    config K_TIMER_LINUX_DISPATCHER_PRIORITY
+        int "k_timer linux dispatcher task priority"
+        depends on IDF_TARGET_LINUX
+        default 20
+        help
+            FreeRTOS task priority for the k_timer expiry dispatcher on
+            the linux target. Should be higher than any task that relies
+            on timely k_timer / k_work_delayable expiry, mirroring the
+            high-priority esp_timer task on hardware.
+
+    config K_TIMER_LINUX_DISPATCHER_STACK_SIZE
+        int "k_timer linux dispatcher task stack size (bytes)"
+        depends on IDF_TARGET_LINUX
+        default 8192
+        help
+            Stack size for the k_timer expiry dispatcher task on the
+            linux target. Expiry callbacks run on this stack. Mirrors
+            the SYSTEM_WORKQUEUE_STACK_SIZE pattern.
 
     config ZKERNEL_FATAL_CAPTURE
         bool "Capture fatal error context to NVS"
