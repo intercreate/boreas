@@ -734,6 +734,15 @@ k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stac
 			k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
 			uint32_t options, k_timeout_t delay);
 void k_thread_name_set(struct k_thread *thread, const char *name);
+/**
+ * @brief Abort a thread (deletes the underlying FreeRTOS task).
+ *
+ * @note On the linux target this blocks for two ticks after deletion:
+ *       the POSIX port defers pthread teardown to the idle task, which
+ *       dereferences the TCB and per-task port state -- the caller's
+ *       k_thread struct and stack must stay valid until that cleanup
+ *       runs. Upstream Zephyr's k_thread_abort does not block this way.
+ */
 void k_thread_abort(struct k_thread *thread);
 void k_thread_suspend(struct k_thread *thread);
 void k_thread_resume(struct k_thread *thread);
