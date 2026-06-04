@@ -73,7 +73,8 @@ static void k_work_queue_thread(void *p1)
 		if (node != NULL) {
 			work = CONTAINER_OF(node, struct k_work, node);
 			__atomic_or_fetch(&work->flags, K_WORK_RUNNING, __ATOMIC_RELAXED);
-			__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
+			__atomic_and_fetch(&work->flags, (uint32_t)~K_WORK_QUEUED,
+					   __ATOMIC_RELAXED);
 			__atomic_store_n(&work->queue, NULL, __ATOMIC_RELEASE);
 		}
 		portEXIT_CRITICAL(&queue->lock);
@@ -84,7 +85,7 @@ static void k_work_queue_thread(void *p1)
 
 		work->handler(work);
 
-		__atomic_and_fetch(&work->flags, ~K_WORK_RUNNING, __ATOMIC_RELAXED);
+		__atomic_and_fetch(&work->flags, (uint32_t)~K_WORK_RUNNING, __ATOMIC_RELAXED);
 
 		/* Signal any flush/cancel_sync waiter */
 		struct k_work_sync *sync = __atomic_load_n(&work->sync, __ATOMIC_ACQUIRE);
@@ -178,7 +179,7 @@ bool k_work_cancel(struct k_work *work)
 
 	if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_QUEUED) {
 		sys_dlist_remove(&work->node);
-		__atomic_and_fetch(&work->flags, ~K_WORK_QUEUED, __ATOMIC_RELAXED);
+		__atomic_and_fetch(&work->flags, (uint32_t)~K_WORK_QUEUED, __ATOMIC_RELAXED);
 		__atomic_store_n(&work->queue, NULL, __ATOMIC_RELEASE);
 
 		/* If a flush waiter (k_work_flush / k_work_cancel_sync) is
@@ -240,12 +241,12 @@ int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync)
 
 	if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_RUNNING) {
 		int ret = k_sem_take(&sync->sem, K_FOREVER);
-		__atomic_and_fetch(&work->flags, ~K_WORK_CANCELING, __ATOMIC_RELAXED);
+		__atomic_and_fetch(&work->flags, (uint32_t)~K_WORK_CANCELING, __ATOMIC_RELAXED);
 		return ret;
 	}
 
 	__atomic_store_n(&work->sync, NULL, __ATOMIC_RELEASE);
-	__atomic_and_fetch(&work->flags, ~K_WORK_CANCELING, __ATOMIC_RELAXED);
+	__atomic_and_fetch(&work->flags, (uint32_t)~K_WORK_CANCELING, __ATOMIC_RELAXED);
 	return 0;
 }
 
