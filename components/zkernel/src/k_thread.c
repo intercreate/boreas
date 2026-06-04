@@ -123,6 +123,19 @@ void k_thread_abort(struct k_thread *thread)
 		}
 		vTaskDelete(thread->handle);
 		thread->handle = NULL;
+#if CONFIG_IDF_TARGET_LINUX
+		/* The POSIX port defers pthread teardown to the idle task
+		 * (portCLEAN_UP_TCB -> vPortCancelThread), which dereferences
+		 * the port's Thread_t parked at the top of the task's stack
+		 * buffer AND the task's TCB. Both must stay valid until idle
+		 * reaps them -- but callers may legally reuse or free the
+		 * stack/struct as soon as abort returns (function-scope
+		 * stacks, struct reuse), which hardware permits. Block
+		 * briefly so idle runs the cleanup before we return; without
+		 * this, idle later cancels a pthread through a dead stack
+		 * frame and corrupts the process. */
+		k_msleep(2 * portTICK_PERIOD_MS);
+#endif
 	}
 }
 

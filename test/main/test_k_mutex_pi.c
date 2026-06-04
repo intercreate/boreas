@@ -79,8 +79,13 @@ static void test_mutex_priority_boost(void)
 {
 	K_THREAD_STACK_DEFINE(low_stack, 4096);
 	K_THREAD_STACK_DEFINE(high_stack, 4096);
-	struct k_thread low_thread = {0};
-	struct k_thread high_thread = {0};
+	/* Static: the TCB inside k_thread must outlive this frame -- joined
+	 * threads stay suspended (not deleted) and aborted ones are reaped
+	 * asynchronously by idle on the linux POSIX port. */
+	static struct k_thread low_thread;
+	static struct k_thread high_thread;
+	memset(&low_thread, 0, sizeof(low_thread));
+	memset(&high_thread, 0, sizeof(high_thread));
 
 	k_mutex_init(&pi_mutex);
 	boosted_priority = 0;
@@ -141,8 +146,13 @@ static void test_mutex_priority_restore(void)
 {
 	K_THREAD_STACK_DEFINE(low_stack, 4096);
 	K_THREAD_STACK_DEFINE(high_stack, 4096);
-	struct k_thread low_thread = {0};
-	struct k_thread high_thread = {0};
+	/* Static: the TCB inside k_thread must outlive this frame -- joined
+	 * threads stay suspended (not deleted) and aborted ones are reaped
+	 * asynchronously by idle on the linux POSIX port. */
+	static struct k_thread low_thread;
+	static struct k_thread high_thread;
+	memset(&low_thread, 0, sizeof(low_thread));
+	memset(&high_thread, 0, sizeof(high_thread));
 
 	k_mutex_init(&pi_mutex);
 	priority_after_unlock = 0;
@@ -306,7 +316,9 @@ static void mutex_holder_entry(void *p1, void *p2, void *p3)
 static void test_mutex_lock_timeout_under_contention(void)
 {
 	K_THREAD_STACK_DEFINE(holder_stack, 4096);
-	struct k_thread holder_thread = {0};
+	/* Static: see test_mutex_priority_boost. */
+	static struct k_thread holder_thread;
+	memset(&holder_thread, 0, sizeof(holder_thread));
 	struct k_mutex mtx;
 
 	k_mutex_init(&mtx);
