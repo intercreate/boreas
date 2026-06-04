@@ -27,7 +27,7 @@
 #include "esp_timer.h"
 
 #if CONFIG_IDF_TARGET_LINUX
-#include <sys/time.h>
+#include <time.h>
 #endif
 
 #include "zephyr/sys/atomic.h"
@@ -49,16 +49,33 @@ typedef StackType_t k_thread_stack_t;
  * Uptime
  * ---------------------------------------------------------------- */
 
+/**
+ * @brief Monotonic microsecond clock (internal helper).
+ *
+ * @note Single time source for all "uptime"-flavored APIs (k_uptime_*,
+ *       k_timer_expires_ticks) and the k_timer linux backend, so they
+ *       share one clock domain. On hardware this is esp_timer_get_time();
+ *       on linux, where esp_timer is headers-only, it is CLOCK_MONOTONIC
+ *       -- monotonic, not wall clock, so immune to NTP/date jumps.
+ */
+#if CONFIG_IDF_TARGET_LINUX
+static inline int64_t z_uptime_us(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+#else
+static inline int64_t z_uptime_us(void)
+{
+	return esp_timer_get_time();
+}
+#endif
+
 /** Get system uptime in milliseconds (monotonic). */
 static inline int64_t k_uptime_get(void)
 {
-#if CONFIG_IDF_TARGET_LINUX
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
-#else
-	return esp_timer_get_time() / 1000;
-#endif
+	return z_uptime_us() / 1000;
 }
 
 /** Get system uptime in 32-bit milliseconds (wraps). */
@@ -69,14 +86,16 @@ static inline uint32_t k_uptime_get_32(void)
 
 /**
  * @brief Get system uptime in FreeRTOS-tick-period units, derived from
- *        the esp_timer microsecond clock. Mirrors upstream Zephyr's
+ *        the monotonic microsecond clock. Mirrors upstream Zephyr's
  *        k_uptime_ticks().
  *
  * @return Tick count since boot, as k_ticks_t.
  *
- * @note Boreas implementation derives this from esp_timer (the same
- *       clock domain as k_uptime_get and k_timer_expires_ticks), NOT
- *       from xTaskGetTickCount. This keeps all "uptime"-flavored APIs
+ * @note Boreas implementation derives this from the monotonic
+ *       microsecond clock (esp_timer on hardware, CLOCK_MONOTONIC on
+ *       linux -- the same clock domain as k_uptime_get and
+ *       k_timer_expires_ticks), NOT from xTaskGetTickCount. This keeps
+ *       all "uptime"-flavored APIs
  *       in a single clock domain and makes
  *       `k_uptime_ticks() * portTICK_PERIOD_MS ~= k_uptime_get()`.
  *       Code that genuinely wants the FreeRTOS scheduler tick counter
@@ -84,7 +103,7 @@ static inline uint32_t k_uptime_get_32(void)
  */
 static inline k_ticks_t k_uptime_ticks(void)
 {
-	return (k_ticks_t)(esp_timer_get_time() / ((int64_t)portTICK_PERIOD_MS * 1000));
+	return (k_ticks_t)(z_uptime_us() / ((int64_t)portTICK_PERIOD_MS * 1000));
 }
 
 /**
@@ -325,6 +344,12 @@ struct k_timer;
  *          **Fallback (CONFIG_K_TIMER_DISPATCH_ISR=n):** Callback runs
  *          on the ESP_TIMER_TASK, a normal FreeRTOS task. Blocking calls
  *          are permitted. This diverges from upstream Zephyr.
+ *
+ *          **Linux target:** CONFIG_K_TIMER_DISPATCH_ISR is unavailable
+ *          (esp_timer is headers-only on linux). Callbacks run on a
+ *          dedicated FreeRTOS dispatcher task (see k_timer_linux.c) --
+ *          task-context semantics, same as the fallback above. Resolution
+ *          is one FreeRTOS tick (1ms at the Boreas default of 1000 Hz).
  */
 typedef void (*k_timer_expiry_t)(struct k_timer *timer);
 
@@ -335,6 +360,11 @@ typedef void (*k_timer_expiry_t)(struct k_timer *timer);
 typedef void (*k_timer_stop_t)(struct k_timer *timer);
 
 struct k_timer {
+	/* On linux, esp_timer is headers-only: the type exists but no timer
+	 * is ever created. The linux backend keeps `handle` as the shared
+	 * initialized/uninitialized sentinel (k_timer_start and k_thread
+	 * abort-safety both test handle == NULL) by setting it to a dummy
+	 * non-NULL value in k_timer_init. */
 	esp_timer_handle_t handle;
 	k_timer_expiry_t expiry_fn;
 	k_timer_stop_t stop_fn;
@@ -344,6 +374,10 @@ struct k_timer {
 	bool is_periodic;            /* last k_timer_start was periodic; one-shot if false */
 	bool first_interval_pending; /* start-once then switch to periodic */
 	uint64_t period_us;          /* stored for deferred periodic start */
+#if CONFIG_IDF_TARGET_LINUX
+	sys_dnode_t node;     /* armed-list linkage (k_timer_linux.c dispatcher) */
+	uint64_t deadline_us; /* next expiry, z_uptime_us() clock domain */
+#endif
 };
 
 #define K_TIMER_DEFINE(name, _expiry_fn, _stop_fn)                                                 \
@@ -364,6 +398,8 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
  *          executing (same constraint as upstream Zephyr). With
  *          CONFIG_K_TIMER_DISPATCH_ISR=y, esp_timer_stop does not
  *          synchronize with an in-flight ISR callback on SMP targets.
+ *          On linux, k_timer_stop likewise does not synchronize with a
+ *          callback the dispatcher task has already dequeued.
  */
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period);
 void k_timer_stop(struct k_timer *timer);
