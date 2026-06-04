@@ -82,7 +82,15 @@ static void z_timer_dispatcher(void *arg)
 				 * spin; the head re-check on wake handles any
 				 * timer started while we slept. */
 				int64_t delta_us = (int64_t)t->deadline_us - now;
-				wait = (TickType_t)((delta_us + tick_us - 1) / tick_us);
+				int64_t wait_ticks = (delta_us + tick_us - 1) / tick_us;
+				/* Clamp: a far deadline must not wrap TickType_t.
+				 * portMAX_DELAY (block until signaled) is correct
+				 * -- any start/stop gives z_recalc_sem. Compare
+				 * unsigned: portMAX_DELAY is all-ones, so a signed
+				 * cast would be -1 and clamp everything. */
+				wait = ((uint64_t)wait_ticks >= (uint64_t)portMAX_DELAY)
+					       ? portMAX_DELAY
+					       : (TickType_t)wait_ticks;
 			}
 		}
 		portEXIT_CRITICAL(&z_armed_lock);
@@ -220,12 +228,23 @@ uint32_t k_timer_status_sync(struct k_timer *timer)
 	return __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
 }
 
+/* Locked snapshot of deadline_us: the dispatcher re-arms periodic timers
+ * (and k_timer_start rewrites the deadline) under z_armed_lock, so an
+ * unlocked read is a data race and a potential torn read on 32-bit. */
+static uint64_t z_timer_deadline_us(const struct k_timer *timer)
+{
+	portENTER_CRITICAL(&z_armed_lock);
+	uint64_t deadline_us = timer->deadline_us;
+	portEXIT_CRITICAL(&z_armed_lock);
+	return deadline_us;
+}
+
 uint32_t k_timer_remaining_get(struct k_timer *timer)
 {
 	if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) || timer->handle == NULL) {
 		return 0;
 	}
-	int64_t remaining_us = (int64_t)timer->deadline_us - z_uptime_us();
+	int64_t remaining_us = (int64_t)z_timer_deadline_us(timer) - z_uptime_us();
 	if (remaining_us <= 0) {
 		return 0;
 	}
@@ -239,7 +258,7 @@ k_ticks_t k_timer_remaining_ticks(const struct k_timer *timer)
 	if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) || timer->handle == NULL) {
 		return 0;
 	}
-	int64_t remaining_us = (int64_t)timer->deadline_us - z_uptime_us();
+	int64_t remaining_us = (int64_t)z_timer_deadline_us(timer) - z_uptime_us();
 	if (remaining_us <= 0) {
 		return 0;
 	}
@@ -259,5 +278,5 @@ k_ticks_t k_timer_expires_ticks(const struct k_timer *timer)
 	if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) || timer->handle == NULL) {
 		return (k_ticks_t)(z_uptime_us() / tick_us);
 	}
-	return (k_ticks_t)(timer->deadline_us / (uint64_t)tick_us);
+	return (k_ticks_t)(z_timer_deadline_us(timer) / (uint64_t)tick_us);
 }
