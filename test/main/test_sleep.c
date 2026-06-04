@@ -65,9 +65,9 @@ static void test_usleep_sub_ms(void)
 	 * it actually delays and does not return early. No upper bound
 	 * because scheduler/ISR preemption can legitimately inflate the
 	 * measured elapsed time. */
-	int64_t before = esp_timer_get_time();
+	int64_t before = z_uptime_us();
 	k_usleep(500);
-	int64_t elapsed_us = esp_timer_get_time() - before;
+	int64_t elapsed_us = z_uptime_us() - before;
 
 	TEST_ASSERT_GREATER_OR_EQUAL(400, elapsed_us);
 }
@@ -90,9 +90,9 @@ static void test_usleep_zero(void)
 	 * upper bound tolerates normal interrupt/scheduler latency
 	 * while still cleanly distinguishing the no-op path from any
 	 * accidental fall-through to esp_rom_delay_us. */
-	int64_t before = esp_timer_get_time();
+	int64_t before = z_uptime_us();
 	int32_t rem = k_usleep(0);
-	int64_t elapsed_us = esp_timer_get_time() - before;
+	int64_t elapsed_us = z_uptime_us() - before;
 
 	TEST_ASSERT_EQUAL(0, rem);
 	TEST_ASSERT_LESS_OR_EQUAL(1000, elapsed_us);
@@ -104,9 +104,9 @@ static void test_usleep_negative(void)
 	 * negative value to esp_rom_delay_us (which takes uint32_t and
 	 * would treat -1 as a ~71-minute delay). 1ms upper bound for
 	 * the same reason as test_usleep_zero. */
-	int64_t before = esp_timer_get_time();
+	int64_t before = z_uptime_us();
 	int32_t rem = k_usleep(-1);
-	int64_t elapsed_us = esp_timer_get_time() - before;
+	int64_t elapsed_us = z_uptime_us() - before;
 
 	TEST_ASSERT_EQUAL(0, rem);
 	TEST_ASSERT_LESS_OR_EQUAL(1000, elapsed_us);
