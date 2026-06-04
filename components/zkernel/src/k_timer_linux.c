@@ -126,9 +126,13 @@ static void __attribute__((constructor)) z_timer_backend_init(void)
 	z_recalc_sem = xSemaphoreCreateBinary();
 	__ASSERT(z_recalc_sem != NULL, "k_timer dispatcher sem alloc failed");
 
-	BaseType_t ret = xTaskCreate(z_timer_dispatcher, "k_timer",
-				     CONFIG_K_TIMER_LINUX_DISPATCHER_STACK_SIZE, NULL,
-				     CONFIG_K_TIMER_LINUX_DISPATCHER_PRIORITY, NULL);
+	/* Depth is in StackType_t words: bytes/words coincide on ESP-IDF
+	 * hardware only because portSTACK_TYPE is uint8_t there; the linux
+	 * port uses unsigned long. Same idiom as k_thread_create. */
+	BaseType_t ret =
+		xTaskCreate(z_timer_dispatcher, "k_timer",
+			    CONFIG_K_TIMER_LINUX_DISPATCHER_STACK_SIZE / sizeof(StackType_t), NULL,
+			    CONFIG_K_TIMER_LINUX_DISPATCHER_PRIORITY, NULL);
 	__ASSERT(ret == pdPASS, "k_timer dispatcher task create failed");
 	(void)ret;
 }
