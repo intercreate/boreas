@@ -13,8 +13,23 @@
 /* Trampoline: adapts Zephyr's 3-arg entry to FreeRTOS's 1-arg entry.
  * If _start_suspended is set, suspends self before calling entry
  * (used for K_FOREVER and finite-delay deferred start).
- * After the entry function returns, the thread suspends itself
- * (safe for static tasks -- vTaskDelete is NOT safe with static TCBs). */
+ * When the entry function returns the thread is terminated -- matching
+ * upstream Zephyr -- via _completed plus a target-specific mechanism;
+ * the _completed store is ordered before it so that observers of the
+ * flag also see all of the entry function's side effects.
+ *
+ * linux: self-delete. Takes the POSIX port's xDying -> pthread_exit
+ * path, so idle's later pthread_join succeeds without relying on
+ * cancellation delivery (which appears undeliverable to threads
+ * parked with all signals blocked on macOS hosts).
+ *
+ * silicon: park in vTaskSuspend; k_thread_join/k_thread_abort reap us
+ * with a vTaskDelete from THEIR context, which FreeRTOS reclaims
+ * synchronously (a non-running task is never idle-deferred). Self-
+ * delete here would defer prvDeleteTCB -- which dereferences the TCB
+ * for newlib reent reclaim -- to the idle task, racing the caller's
+ * storage reuse after join/abort returns (observed as a wild free()
+ * from idle on esp32s3). */
 static void k_thread_entry_wrapper(void *arg)
 {
 	struct k_thread *thread = (struct k_thread *)arg;
@@ -24,7 +39,35 @@ static void k_thread_entry_wrapper(void *arg)
 	}
 
 	thread->entry(thread->p1, thread->p2, thread->p3);
-	vTaskSuspend(NULL);
+
+	__atomic_store_n(&thread->_completed, true, __ATOMIC_RELEASE);
+#if CONFIG_IDF_TARGET_LINUX
+	vTaskDelete(NULL);
+#else
+	vTaskSuspend(NULL); /* parked until join/abort reaps us */
+#endif
+}
+
+/* Reclaim a thread whose entry function has returned (_completed set).
+ * linux: the wrapper self-deleted and the POSIX port's idle task reaps
+ * the dead pthread through the TCB and the Thread_t inside the stack
+ * buffer -- block two ticks so that happens while the caller's
+ * struct/stack are still valid.
+ * silicon: the wrapper is parked in (or headed for) vTaskSuspend; wait
+ * for it to arrive, then delete it from this context so reclamation is
+ * synchronous. When this returns, the kernel holds no references into
+ * the caller's storage. */
+static void z_thread_reap_completed(struct k_thread *thread)
+{
+#if CONFIG_IDF_TARGET_LINUX
+	(void)thread;
+	k_msleep(2 * portTICK_PERIOD_MS);
+#else
+	while (eTaskGetState(thread->handle) != eSuspended) {
+		vTaskDelay(1); /* between the _completed store and the park */
+	}
+	vTaskDelete(thread->handle);
+#endif
 }
 
 #ifdef CONFIG_K_TIMER_DISPATCH_ISR
@@ -73,6 +116,7 @@ k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stac
 	thread->p2 = p2;
 	thread->p3 = p3;
 	thread->_delay_timer.handle = NULL; /* explicitly clear for abort safety */
+	thread->_completed = false;         /* struct may be reused after join/abort */
 
 	/* Set flag BEFORE creating task so the wrapper sees it immediately */
 	thread->_start_suspended = !k_timeout_is_no_wait(delay);
@@ -121,6 +165,15 @@ void k_thread_abort(struct k_thread *thread)
 		if (thread->_delay_timer.handle != NULL) {
 			k_timer_stop(&thread->_delay_timer);
 		}
+		/* If the entry function already returned, take the reap path:
+		 * on linux the task already self-deleted (a second delete
+		 * would corrupt the termination list); on silicon it is
+		 * parked awaiting our synchronous delete. */
+		if (__atomic_load_n(&thread->_completed, __ATOMIC_ACQUIRE)) {
+			z_thread_reap_completed(thread);
+			thread->handle = NULL;
+			return;
+		}
 		vTaskDelete(thread->handle);
 		thread->handle = NULL;
 #if CONFIG_IDF_TARGET_LINUX
@@ -155,13 +208,23 @@ void k_thread_resume(struct k_thread *thread)
 
 int k_thread_join(struct k_thread *thread, k_timeout_t timeout)
 {
-	/* FreeRTOS doesn't have native join. Poll eTaskGetState. */
+	/* FreeRTOS doesn't have native join. Poll for completion. The
+	 * _completed flag is the primary signal (set by the entry wrapper
+	 * before self-delete); eDeleted/eInvalid catch externally aborted
+	 * tasks. eSuspended is deliberately NOT treated as completion --
+	 * a user-suspended or deferred-start thread has not terminated
+	 * (upstream Zephyr blocks in that case too). */
 	TickType_t deadline = xTaskGetTickCount() + k_timeout_to_ticks(timeout);
 	bool forever = k_timeout_is_forever(timeout);
 
 	while (thread->handle != NULL) {
+		bool completed = __atomic_load_n(&thread->_completed, __ATOMIC_ACQUIRE);
 		eTaskState state = eTaskGetState(thread->handle);
-		if (state == eDeleted || state == eInvalid || state == eSuspended) {
+
+		if (completed || state == eDeleted || state == eInvalid) {
+			if (completed) {
+				z_thread_reap_completed(thread);
+			}
 			thread->handle = NULL;
 			return 0;
 		}
