@@ -609,8 +609,10 @@ bool k_work_is_pending(struct k_work *work);
 int k_work_flush(struct k_work *work, struct k_work_sync *sync);
 int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync);
 
-/** Snapshot of work item flags. Returns a mask of K_WORK_RUNNING,
- *  K_WORK_CANCELING, K_WORK_QUEUED. */
+/** Snapshot of the raw work item flags mask. Boreas sets only
+ *  K_WORK_RUNNING, K_WORK_CANCELING, and K_WORK_QUEUED; K_WORK_DELAYED
+ *  and K_WORK_FLUSHING exist for upstream source compatibility but are
+ *  never set (see the mask definitions above). */
 uint32_t k_work_busy_get(const struct k_work *work);
 
 /**
