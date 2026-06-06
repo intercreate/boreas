@@ -1,0 +1,36 @@
+#!/bin/sh
+# Boreas pre-commit hook: clang-format check on staged C sources.
+#
+# Enable once per clone:
+#   git config core.hooksPath tools/hooks
+#
+# Checks the working copy of staged .c/.h files. Fails the commit with
+# fix instructions if any file is not clang-format clean. Skips quietly
+# if clang-format is not installed (CI still enforces formatting).
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.c' '*.h')
+[ -z "$files" ] && exit 0
+
+if ! command -v clang-format >/dev/null 2>&1; then
+	echo "pre-commit: clang-format not found; skipping format check (CI will enforce)" >&2
+	exit 0
+fi
+
+fail=0
+for f in $files; do
+	# Staged-then-deleted files have no working copy to check.
+	[ -f "$f" ] || continue
+	if ! clang-format --dry-run -Werror "$f"; then
+		fail=1
+	fi
+done
+
+if [ "$fail" -ne 0 ]; then
+	echo "" >&2
+	echo "pre-commit: formatting errors in staged files. Fix with:" >&2
+	echo "  clang-format -i $(echo $files | tr '\n' ' ')" >&2
+	echo "then re-stage and commit." >&2
+	exit 1
+fi
+
+exit 0
