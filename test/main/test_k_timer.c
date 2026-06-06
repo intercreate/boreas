@@ -171,11 +171,10 @@ K_THREAD_STACK_DEFINE(stop_waker_stack, 2048);
 static void test_timer_status_sync_wakes_on_stop(void)
 {
 	struct k_timer timer;
-	/* Static: k_thread_join does not delete the task -- the completed
-	 * thread stays parked in its final vTaskSuspend with the TCB (and
-	 * its kernel list node) inside this struct, so it must outlive the
-	 * test function. A stack-local struct leaves a dangling list node
-	 * in a dead frame (crashes the linux POSIX port; latent UB on HW). */
+	/* Static out of caution: k_thread_join now reaps the completed
+	 * task before returning, so stack-local would be legal -- but the
+	 * struct embeds the TCB, and keeping it static removes any
+	 * dependence on reap timing. */
 	static struct k_thread waker_thread;
 	static struct stop_waker_ctx ctx;
 
