@@ -79,9 +79,10 @@ static void test_mutex_priority_boost(void)
 {
 	K_THREAD_STACK_DEFINE(low_stack, 4096);
 	K_THREAD_STACK_DEFINE(high_stack, 4096);
-	/* Static: the TCB inside k_thread must outlive this frame -- joined
-	 * threads stay suspended (not deleted) and aborted ones are reaped
-	 * asynchronously by idle on the linux POSIX port. */
+	/* Static out of caution: join/abort now sever all kernel
+	 * references before returning, so stack-local would be legal --
+	 * but the struct embeds the TCB, and keeping it static removes
+	 * any dependence on reap timing. */
 	static struct k_thread low_thread;
 	static struct k_thread high_thread;
 	memset(&low_thread, 0, sizeof(low_thread));
@@ -146,9 +147,10 @@ static void test_mutex_priority_restore(void)
 {
 	K_THREAD_STACK_DEFINE(low_stack, 4096);
 	K_THREAD_STACK_DEFINE(high_stack, 4096);
-	/* Static: the TCB inside k_thread must outlive this frame -- joined
-	 * threads stay suspended (not deleted) and aborted ones are reaped
-	 * asynchronously by idle on the linux POSIX port. */
+	/* Static out of caution: join/abort now sever all kernel
+	 * references before returning, so stack-local would be legal --
+	 * but the struct embeds the TCB, and keeping it static removes
+	 * any dependence on reap timing. */
 	static struct k_thread low_thread;
 	static struct k_thread high_thread;
 	memset(&low_thread, 0, sizeof(low_thread));
