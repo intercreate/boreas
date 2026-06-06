@@ -367,7 +367,7 @@ int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *d
 	 * canceling -- but DOES schedule when it is only running (the next
 	 * occurrence may be scheduled while the current one executes). */
 	if ((k_work_busy_get(&dwork->work) & (uint32_t)~K_WORK_RUNNING) != 0 ||
-	    dwork->timer.running) {
+	    __atomic_load_n(&dwork->timer.running, __ATOMIC_ACQUIRE)) {
 		return 0; /* already scheduled -- no change */
 	}
 
@@ -409,7 +409,8 @@ int k_work_cancel_delayable(struct k_work_delayable *dwork)
 
 bool k_work_delayable_is_pending(struct k_work_delayable *dwork)
 {
-	return k_work_is_pending(&dwork->work) || dwork->timer.running;
+	return k_work_is_pending(&dwork->work) ||
+	       __atomic_load_n(&dwork->timer.running, __ATOMIC_ACQUIRE);
 }
 
 int64_t k_work_delayable_remaining_get(struct k_work_delayable *dwork)
