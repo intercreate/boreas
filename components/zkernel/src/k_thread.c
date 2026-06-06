@@ -42,9 +42,15 @@ static void k_thread_entry_wrapper(void *arg)
 
 	__atomic_store_n(&thread->_completed, true, __ATOMIC_RELEASE);
 #if CONFIG_IDF_TARGET_LINUX
-	vTaskDelete(NULL);
+	vTaskDelete(NULL); /* cannot return (pthread_exit) */
 #else
-	vTaskSuspend(NULL); /* parked until join/abort reaps us */
+	/* Parked until join/abort reaps us. Looped: a stray resume of a
+	 * completed thread would otherwise return from vTaskSuspend and
+	 * fall off the task function -- a fatal abort() in ESP-IDF's
+	 * vPortTaskWrapper. Re-park instead. */
+	for (;;) {
+		vTaskSuspend(NULL);
+	}
 #endif
 }
 
