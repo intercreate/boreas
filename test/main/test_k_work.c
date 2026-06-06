@@ -46,8 +46,8 @@ static void test_work_cancel(void)
 	struct k_work work;
 	k_work_init(&work, test_work_handler);
 
-	/* Cancel on non-queued work should succeed */
-	TEST_ASSERT_TRUE(k_work_cancel(&work));
+	/* Cancel on non-queued work: item is idle afterwards -> 0 */
+	TEST_ASSERT_EQUAL(0, k_work_cancel(&work));
 }
 
 static void test_work_is_pending(void)
@@ -223,8 +223,8 @@ static void test_work_cancel_while_pending(void)
 	TEST_ASSERT_EQUAL(1, k_work_submit(&victim));
 	TEST_ASSERT_TRUE(k_work_busy_get(&victim) & K_WORK_QUEUED);
 
-	/* Cancel synchronously removes from the list. */
-	TEST_ASSERT_TRUE(k_work_cancel(&victim));
+	/* Cancel synchronously removes from the list; item idle -> 0 */
+	TEST_ASSERT_EQUAL(0, k_work_cancel(&victim));
 	TEST_ASSERT_FALSE(k_work_busy_get(&victim) & K_WORK_QUEUED);
 
 	/* Re-submit must succeed immediately -- the slot is free. */
@@ -282,12 +282,13 @@ static void test_work_cancel_sync_running(void)
 	k_msleep(30); /* let it start running */
 	TEST_ASSERT_TRUE(k_work_busy_get(&work) & K_WORK_RUNNING);
 
-	/* cancel_sync must block until handler finishes */
+	/* cancel_sync must block until handler finishes; the work was
+	 * pending (running) -> true */
 	int64_t start = k_uptime_get();
-	int ret = k_work_cancel_sync(&work, &sync);
+	bool was_pending = k_work_cancel_sync(&work, &sync);
 	int64_t elapsed = k_uptime_get() - start;
 
-	TEST_ASSERT_EQUAL(0, ret);
+	TEST_ASSERT_TRUE(was_pending);
 	TEST_ASSERT_EQUAL(1, cancel_sync_done);
 	TEST_ASSERT_GREATER_OR_EQUAL(50, elapsed);
 }
@@ -479,8 +480,8 @@ static void test_work_flush_unblocked_by_cancel(void)
 	k_msleep(50); /* let helper enter k_sem_take */
 	TEST_ASSERT_FALSE_MESSAGE(flush_returned, "flush returned before cancel -- bad test setup");
 
-	/* Cancel must release the flush waiter. */
-	TEST_ASSERT_TRUE(k_work_cancel(&flush_victim));
+	/* Cancel must release the flush waiter; item idle -> 0 */
+	TEST_ASSERT_EQUAL(0, k_work_cancel(&flush_victim));
 	k_msleep(50);
 	TEST_ASSERT_TRUE_MESSAGE(flush_returned,
 				 "k_work_flush deadlocked: cancel didn't release sync waiter");
@@ -553,6 +554,127 @@ static void test_work_return_codes_errors(void)
 	TEST_ASSERT_EQUAL(-EINVAL, k_work_submit(&no_handler));
 }
 
+/* ----------------------------------------------------------------
+ * CANCELING enforcement + k_work_cancel_delayable_sync
+ * ---------------------------------------------------------------- */
+
+static struct k_work_delayable self_dwork;
+static volatile int self_ticks;
+
+/* Periodic-service pattern, tick-then-reschedule variant. */
+static void self_resched_tick_first(struct k_work *work)
+{
+	struct k_work_delayable *d = CONTAINER_OF(work, struct k_work_delayable, work);
+
+	self_ticks++;
+	k_work_reschedule(d, K_MSEC(20));
+}
+
+/* Reschedule-then-tick variant (re-arm happens before the visible
+ * side effect, the worst case for a racy cancel). */
+static void self_resched_arm_first(struct k_work *work)
+{
+	struct k_work_delayable *d = CONTAINER_OF(work, struct k_work_delayable, work);
+
+	k_work_reschedule(d, K_MSEC(20));
+	self_ticks++;
+}
+
+static void run_self_rescheduler_stop(k_work_handler_t handler)
+{
+	struct k_work_sync sync;
+
+	k_work_init_delayable(&self_dwork, handler);
+	self_ticks = 0;
+
+	TEST_ASSERT_EQUAL(1, k_work_schedule(&self_dwork, K_MSEC(10)));
+	k_msleep(100); /* let it tick several times */
+	TEST_ASSERT_GREATER_OR_EQUAL(2, self_ticks);
+
+	/* One call stops the loop, no matter where in its cycle it is. */
+	TEST_ASSERT_TRUE(k_work_cancel_delayable_sync(&self_dwork, &sync));
+
+	int snapshot = self_ticks;
+	k_msleep(150); /* > 2 re-arm periods */
+	TEST_ASSERT_EQUAL(snapshot, self_ticks);
+	TEST_ASSERT_FALSE(k_work_delayable_is_pending(&self_dwork));
+	TEST_ASSERT_EQUAL(0, k_work_busy_get(&self_dwork.work));
+}
+
+static void test_work_cancel_delayable_sync_stops_tick_first(void)
+{
+	run_self_rescheduler_stop(self_resched_tick_first);
+}
+
+static void test_work_cancel_delayable_sync_stops_arm_first(void)
+{
+	run_self_rescheduler_stop(self_resched_arm_first);
+}
+
+static void test_work_cancel_delayable_sync_idle(void)
+{
+	struct k_work_delayable dwork;
+	struct k_work_sync sync;
+
+	k_work_init_delayable(&dwork, test_work_handler);
+
+	/* Idle work: nothing to cancel -> false */
+	TEST_ASSERT_FALSE(k_work_cancel_delayable_sync(&dwork, &sync));
+	TEST_ASSERT_EQUAL(0, k_work_busy_get(&dwork.work));
+}
+
+/* Probe the CANCELING window: a helper thread blocks in
+ * k_work_cancel_sync while the handler is parked; main asserts that
+ * submission is rejected with -EBUSY for the duration. */
+K_THREAD_STACK_DEFINE(cancel_helper_stack, 4096);
+static struct k_thread cancel_helper;
+static struct k_work canceling_probe_work;
+static struct k_work_sync canceling_probe_sync;
+static volatile bool cancel_helper_result;
+static volatile bool cancel_helper_done;
+
+static void cancel_helper_entry(void *p1, void *p2, void *p3)
+{
+	(void)p1;
+	(void)p2;
+	(void)p3;
+	cancel_helper_result = k_work_cancel_sync(&canceling_probe_work, &canceling_probe_sync);
+	cancel_helper_done = true;
+}
+
+static void test_work_submit_during_cancel_returns_ebusy(void)
+{
+	k_work_init(&canceling_probe_work, blocking_handler);
+	k_sem_init(&block_sem, 0, 1);
+	cancel_helper_done = false;
+	cancel_helper_result = false;
+
+	/* Park the handler. */
+	TEST_ASSERT_EQUAL(1, k_work_submit(&canceling_probe_work));
+	k_msleep(20);
+	TEST_ASSERT_TRUE(k_work_busy_get(&canceling_probe_work) & K_WORK_RUNNING);
+
+	/* Helper blocks in cancel_sync waiting out the handler. */
+	k_thread_create(&cancel_helper, cancel_helper_stack,
+			K_THREAD_STACK_SIZEOF(cancel_helper_stack), cancel_helper_entry, NULL, NULL,
+			NULL, 5, 0, K_NO_WAIT);
+	k_msleep(30);
+	TEST_ASSERT_FALSE(cancel_helper_done);
+	TEST_ASSERT_TRUE(k_work_busy_get(&canceling_probe_work) & K_WORK_CANCELING);
+
+	/* The CANCELING window rejects submission... */
+	TEST_ASSERT_EQUAL(-EBUSY, k_work_submit(&canceling_probe_work));
+	/* ...and a plain cancel reports the still-busy state. */
+	TEST_ASSERT_TRUE(k_work_cancel(&canceling_probe_work) & K_WORK_RUNNING);
+
+	/* Release the handler; the helper's cancel_sync completes. */
+	k_sem_give(&block_sem);
+	TEST_ASSERT_EQUAL(0, k_thread_join(&cancel_helper, K_SECONDS(2)));
+	TEST_ASSERT_TRUE(cancel_helper_done);
+	TEST_ASSERT_TRUE(cancel_helper_result); /* was pending */
+	TEST_ASSERT_EQUAL(0, k_work_busy_get(&canceling_probe_work));
+}
+
 void test_k_work_group(void)
 {
 	RUN_TEST(test_work_submit);
@@ -579,4 +701,8 @@ void test_k_work_group(void)
 	RUN_TEST(test_work_return_codes_submit_running);
 	RUN_TEST(test_work_return_codes_schedule);
 	RUN_TEST(test_work_return_codes_errors);
+	RUN_TEST(test_work_cancel_delayable_sync_stops_tick_first);
+	RUN_TEST(test_work_cancel_delayable_sync_stops_arm_first);
+	RUN_TEST(test_work_cancel_delayable_sync_idle);
+	RUN_TEST(test_work_submit_during_cancel_returns_ebusy);
 }

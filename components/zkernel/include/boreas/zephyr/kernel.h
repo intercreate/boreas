@@ -559,6 +559,8 @@ void k_work_init(struct k_work *work, k_work_handler_t handler);
  * @retval 0 if already queued (no change)
  * @retval 1 if it was idle and has been queued
  * @retval 2 if it was running and has been queued again
+ * @retval -EBUSY if a cancellation of @p work is in progress (see
+ *         k_work_cancel_sync())
  * @retval -EINVAL if @p work has no handler (upstream asserts on this
  *         instead of returning)
  * @retval -ENODEV if the queue has not been started
@@ -578,21 +580,24 @@ int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work);
 int k_work_submit(struct k_work *work);
 
 /**
- * Cancel a pending work item.
+ * Cancel a pending work item without waiting.
  *
- * Synchronously removes the item from its queue's pending list (O(1)
- * via sys_dlist_remove). Cannot cancel a work item that is currently
- * running -- use k_work_cancel_sync() to wait for completion.
+ * Synchronously removes a queued instance from its queue's pending
+ * list (O(1) via sys_dlist_remove) -- including an instance that was
+ * queued again while a previous one is still running. Does not
+ * interrupt a running handler; use k_work_cancel_sync() to wait for
+ * completion.
  *
  * @note If a flush waiter (k_work_flush / k_work_cancel_sync) is
- *       attached when a queued item is cancelled, the waiter is
- *       released here -- the cancelled item will never run, so
- *       the worker can no longer signal it.
+ *       attached when a queued, not-running item is cancelled, the
+ *       waiter is released here -- the cancelled item will never run,
+ *       so the worker can no longer signal it.
  *
- * @return true if the item was cancelled (or was not queued), false
- *         if the item is currently running.
+ * @return the k_work_busy_get() state after the cancellation steps
+ *         complete (upstream parity): 0 if the item is now idle;
+ *         K_WORK_RUNNING and/or K_WORK_CANCELING may remain set.
  */
-bool k_work_cancel(struct k_work *work);
+int k_work_cancel(struct k_work *work);
 bool k_work_is_pending(struct k_work *work);
 
 /**
@@ -600,14 +605,30 @@ bool k_work_is_pending(struct k_work *work);
  * pending).
  *
  * @note Only one flush may be in flight per work item at a time --
- *       k_work_flush and k_work_cancel_sync share the work->sync
- *       slot. A concurrent second call overwrites the first
- *       waiter's sync pointer, leaving the first caller blocked
+ *       k_work_flush and the cancel_sync functions share the
+ *       work->sync slot. A concurrent second call overwrites the
+ *       first waiter's sync pointer, leaving the first caller blocked
  *       forever. Boreas does not implement upstream Zephyr's
  *       wait-queue model.
  */
 int k_work_flush(struct k_work *work, struct k_work_sync *sync);
-int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync);
+
+/**
+ * Cancel a work item and wait for any in-flight handler to complete.
+ *
+ * While the cancellation is in progress, submission of this item is
+ * rejected with -EBUSY (including from the delayable timer-expiry
+ * path), so a handler re-submitting itself cannot survive the cancel.
+ * On return the item is idle unless something submits it afterwards.
+ *
+ * @note See the single-waiter limitation on k_work_flush().
+ * @note Must not be called from the work queue thread running @p work.
+ *
+ * @retval true if the work was pending (a queued/running instance was
+ *         cancelled or waited out)
+ * @retval false if it was already idle
+ */
+bool k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync);
 
 /** Snapshot of the raw work item flags mask. Boreas sets only
  *  K_WORK_RUNNING, K_WORK_CANCELING, and K_WORK_QUEUED; K_WORK_DELAYED
@@ -696,7 +717,7 @@ void k_work_init_delayable(struct k_work_delayable *dwork, k_work_handler_t hand
  * @retval 1 if the timeout was armed
  * @retval 2 if @p delay is K_NO_WAIT and the work was running and has
  *         been queued again
- * @retval -EINVAL / -ENODEV propagated from the K_NO_WAIT submit path
+ * @retval -EBUSY / -EINVAL / -ENODEV propagated from the K_NO_WAIT submit path
  *         (see k_work_submit_to_queue())
  *
  * @note Unlike upstream (which serializes the decision under a global
@@ -720,7 +741,7 @@ int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay);
  * @retval 0 if @p delay is K_NO_WAIT and a queued instance could not
  *         be cancelled (it was queued again while running) -- nothing
  *         changed
- * @retval -EINVAL / -ENODEV propagated from the K_NO_WAIT submit path
+ * @retval -EBUSY / -EINVAL / -ENODEV propagated from the K_NO_WAIT submit path
  *         (see k_work_submit_to_queue())
  */
 int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
@@ -728,7 +749,34 @@ int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable 
 /** Reschedule on the system work queue; return values as
  *  k_work_reschedule_for_queue(). */
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay);
+/**
+ * Cancel delayable work without waiting: stops a pending timeout and
+ * removes a queued instance. Does not wait for a running handler.
+ *
+ * @return the k_work_busy_get() state after the cancellation steps
+ *         complete (upstream parity): 0 if now idle; K_WORK_RUNNING
+ *         and/or K_WORK_CANCELING may remain set.
+ */
 int k_work_cancel_delayable(struct k_work_delayable *dwork);
+
+/**
+ * Cancel delayable work and wait until it cannot run again: stops a
+ * pending timeout, removes a queued instance, and waits out a running
+ * handler. While the cancellation is in progress, submission is
+ * rejected with -EBUSY (including the timer-expiry path), and any
+ * timeout a handler re-arms during the cancel is stopped before
+ * returning -- so a self-rescheduling handler is reliably stopped
+ * with this one call.
+ *
+ * @note See the single-waiter limitation on k_work_flush().
+ * @note Must not be called from the work queue thread running the
+ *       work item.
+ *
+ * @retval true if the work was pending (scheduled, queued, or running)
+ * @retval false if it was already idle
+ */
+bool k_work_cancel_delayable_sync(struct k_work_delayable *dwork, struct k_work_sync *sync);
+
 bool k_work_delayable_is_pending(struct k_work_delayable *dwork);
 int64_t k_work_delayable_remaining_get(struct k_work_delayable *dwork);
 
