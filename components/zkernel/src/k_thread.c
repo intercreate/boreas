@@ -48,22 +48,42 @@ static void k_thread_entry_wrapper(void *arg)
 #endif
 }
 
+/* Best-effort window for the POSIX port's idle task to reap a deleted
+ * task. portCLEAN_UP_TCB -> vPortCancelThread runs in idle and
+ * dereferences the TCB AND the port's Thread_t parked at the top of
+ * the task's stack buffer -- both live in caller-owned storage, which
+ * the caller may legally reuse or free as soon as join/abort returns.
+ * Block two ticks so idle runs the cleanup first. BEST-EFFORT: nothing
+ * exported by the port signals "reap done", so a system whose ready
+ * tasks starve idle could still hold references after this returns;
+ * the linux backend exists for host test runners, where the blocked
+ * caller reliably yields the CPU to idle (see @note on k_thread_join).
+ * No-op on silicon, where reclamation is synchronous. */
+static void z_thread_linux_reap_window(void)
+{
+#if CONFIG_IDF_TARGET_LINUX
+	k_msleep(2 * portTICK_PERIOD_MS);
+#endif
+}
+
 /* Reclaim a thread whose entry function has returned (_completed set).
- * linux: the wrapper self-deleted and the POSIX port's idle task reaps
- * the dead pthread through the TCB and the Thread_t inside the stack
- * buffer -- block two ticks so that happens while the caller's
- * struct/stack are still valid.
  * silicon: the wrapper is parked in (or headed for) vTaskSuspend; wait
  * for it to arrive, then delete it from this context so reclamation is
- * synchronous. When this returns, the kernel holds no references into
- * the caller's storage. */
+ * synchronous and DETERMINISTIC -- when this returns, the kernel holds
+ * no references into the caller's storage.
+ * linux: the wrapper self-deleted; give idle its reap window. */
 static void z_thread_reap_completed(struct k_thread *thread)
 {
 #if CONFIG_IDF_TARGET_LINUX
 	(void)thread;
-	k_msleep(2 * portTICK_PERIOD_MS);
+	z_thread_linux_reap_window();
 #else
-	while (eTaskGetState(thread->handle) != eSuspended) {
+	eTaskState state;
+
+	while ((state = eTaskGetState(thread->handle)) != eSuspended) {
+		if (state == eDeleted || state == eInvalid) {
+			return; /* already reaped (e.g. a racing join/abort) */
+		}
 		vTaskDelay(1); /* between the _completed store and the park */
 	}
 	vTaskDelete(thread->handle);
@@ -168,7 +188,16 @@ void k_thread_abort(struct k_thread *thread)
 		/* If the entry function already returned, take the reap path:
 		 * on linux the task already self-deleted (a second delete
 		 * would corrupt the termination list); on silicon it is
-		 * parked awaiting our synchronous delete. */
+		 * parked awaiting our synchronous delete.
+		 *
+		 * Known window (no kernel-lock access from a compat layer):
+		 * an abort racing the entry function's return can observe
+		 * _completed == false here and then delete a task that
+		 * finishes in between. On silicon that is a benign
+		 * abort-while-running; on linux a tick preemption landing
+		 * exactly between this load and the vTaskDelete below could
+		 * double-delete. Do not abort a thread concurrently with
+		 * its own exit (see @note on k_thread_join). */
 		if (__atomic_load_n(&thread->_completed, __ATOMIC_ACQUIRE)) {
 			z_thread_reap_completed(thread);
 			thread->handle = NULL;
@@ -176,19 +205,7 @@ void k_thread_abort(struct k_thread *thread)
 		}
 		vTaskDelete(thread->handle);
 		thread->handle = NULL;
-#if CONFIG_IDF_TARGET_LINUX
-		/* The POSIX port defers pthread teardown to the idle task
-		 * (portCLEAN_UP_TCB -> vPortCancelThread), which dereferences
-		 * the port's Thread_t parked at the top of the task's stack
-		 * buffer AND the task's TCB. Both must stay valid until idle
-		 * reaps them -- but callers may legally reuse or free the
-		 * stack/struct as soon as abort returns (function-scope
-		 * stacks, struct reuse), which hardware permits. Block
-		 * briefly so idle runs the cleanup before we return; without
-		 * this, idle later cancels a pthread through a dead stack
-		 * frame and corrupts the process. */
-		k_msleep(2 * portTICK_PERIOD_MS);
-#endif
+		z_thread_linux_reap_window();
 	}
 }
 
@@ -217,16 +234,27 @@ int k_thread_join(struct k_thread *thread, k_timeout_t timeout)
 	TickType_t deadline = xTaskGetTickCount() + k_timeout_to_ticks(timeout);
 	bool forever = k_timeout_is_forever(timeout);
 
-	while (thread->handle != NULL) {
-		bool completed = __atomic_load_n(&thread->_completed, __ATOMIC_ACQUIRE);
-		eTaskState state = eTaskGetState(thread->handle);
+	if (thread->handle != NULL && thread->handle == xTaskGetCurrentTaskHandle()) {
+		return -EDEADLK; /* joining self -- matches upstream Zephyr */
+	}
 
-		if (completed || state == eDeleted || state == eInvalid) {
-			if (completed) {
-				z_thread_reap_completed(thread);
-			}
+	while (thread->handle != NULL) {
+		if (__atomic_load_n(&thread->_completed, __ATOMIC_ACQUIRE)) {
+			z_thread_reap_completed(thread);
 			thread->handle = NULL;
 			return 0;
+		}
+
+		eTaskState state = eTaskGetState(thread->handle);
+		if (state == eDeleted || state == eInvalid) {
+			/* Externally deleted without completing (e.g. a racing
+			 * abort from another context). */
+			thread->handle = NULL;
+			z_thread_linux_reap_window();
+			return 0;
+		}
+		if (k_timeout_is_no_wait(timeout)) {
+			return -EBUSY; /* still running -- matches upstream Zephyr */
 		}
 		if (!forever && xTaskGetTickCount() >= deadline) {
 			return -EAGAIN;

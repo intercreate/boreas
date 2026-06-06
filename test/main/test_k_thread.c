@@ -159,6 +159,9 @@ static void test_thread_join_suspended_times_out(void)
 
 	k_msleep(50); /* let it reach the suspend */
 
+	/* K_NO_WAIT on a live thread reports busy (upstream parity) */
+	TEST_ASSERT_EQUAL(-EBUSY, k_thread_join(&thread, K_NO_WAIT));
+
 	int ret = k_thread_join(&thread, K_MSEC(100));
 	TEST_ASSERT_EQUAL(-EAGAIN, ret);
 
