@@ -738,9 +738,9 @@ int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay);
  * @retval 1 if the timeout was armed
  * @retval 2 if @p delay is K_NO_WAIT and the work was running and has
  *         been queued again
- * @retval 0 if @p delay is K_NO_WAIT and a queued instance could not
- *         be cancelled (it was queued again while running) -- nothing
- *         changed
+ * @retval 0 if @p delay is K_NO_WAIT and the queued instance could
+ *         not be removed (cancel is best-effort across queues; see
+ *         k_work_cancel()) -- nothing changed
  * @retval -EBUSY / -EINVAL / -ENODEV propagated from the K_NO_WAIT submit path
  *         (see k_work_submit_to_queue())
  */
