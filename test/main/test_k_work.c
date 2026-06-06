@@ -3,6 +3,8 @@
  * Copyright 2026 Intercreate
  */
 
+#include <errno.h>
+
 #include "unity.h"
 #include "zephyr/kernel.h"
 
@@ -21,7 +23,7 @@ static void test_work_submit(void)
 	k_work_init(&work, test_work_handler);
 	work_executed = 0;
 
-	TEST_ASSERT_EQUAL(0, k_work_submit(&work));
+	TEST_ASSERT_EQUAL(1, k_work_submit(&work)); /* 1 = was idle, queued */
 	k_msleep(100);
 	TEST_ASSERT_EQUAL(1, work_executed);
 }
@@ -33,8 +35,8 @@ static void test_work_submit_idempotent(void)
 	k_work_init(&work, test_work_handler);
 	work_executed = 0;
 
-	TEST_ASSERT_EQUAL(0, k_work_submit(&work));
-	k_work_submit(&work);
+	TEST_ASSERT_EQUAL(1, k_work_submit(&work)); /* 1 = was idle, queued */
+	k_work_submit(&work);                       /* 0 (still queued) or 1/2 if it raced ahead */
 	k_msleep(100);
 	TEST_ASSERT_GREATER_OR_EQUAL(1, work_executed);
 }
@@ -138,7 +140,7 @@ static void test_work_submit_to_queue(void)
 	custom_wq_executed = 0;
 
 	/* submit_to_queue with explicit queue (vs submit which uses sys queue) */
-	TEST_ASSERT_EQUAL(0, k_work_submit_to_queue(&k_sys_work_q, &work));
+	TEST_ASSERT_EQUAL(1, k_work_submit_to_queue(&k_sys_work_q, &work));
 	k_msleep(100);
 	TEST_ASSERT_EQUAL(1, custom_wq_executed);
 }
@@ -214,11 +216,11 @@ static void test_work_cancel_while_pending(void)
 	work_executed = 0;
 
 	/* Submit blocker first -- worker takes it and parks on block_sem. */
-	TEST_ASSERT_EQUAL(0, k_work_submit(&blocker));
+	TEST_ASSERT_EQUAL(1, k_work_submit(&blocker));
 	k_msleep(20);
 
 	/* Now submit victim; worker is busy, so it stays QUEUED. */
-	TEST_ASSERT_EQUAL(0, k_work_submit(&victim));
+	TEST_ASSERT_EQUAL(1, k_work_submit(&victim));
 	TEST_ASSERT_TRUE(k_work_busy_get(&victim) & K_WORK_QUEUED);
 
 	/* Cancel synchronously removes from the list. */
@@ -226,7 +228,7 @@ static void test_work_cancel_while_pending(void)
 	TEST_ASSERT_FALSE(k_work_busy_get(&victim) & K_WORK_QUEUED);
 
 	/* Re-submit must succeed immediately -- the slot is free. */
-	TEST_ASSERT_EQUAL(0, k_work_submit(&victim));
+	TEST_ASSERT_EQUAL(1, k_work_submit(&victim));
 	TEST_ASSERT_TRUE(k_work_busy_get(&victim) & K_WORK_QUEUED);
 
 	/* Unblock worker and drain. */
@@ -348,7 +350,7 @@ static void test_work_custom_queue_with_cfg(void)
 	k_work_init(&work, custom_q_handler);
 	custom_q_executed = 0;
 
-	TEST_ASSERT_EQUAL(0, k_work_submit_to_queue(&custom_wq, &work));
+	TEST_ASSERT_EQUAL(1, k_work_submit_to_queue(&custom_wq, &work));
 	k_work_queue_drain(&custom_wq, false);
 	TEST_ASSERT_EQUAL(1, custom_q_executed);
 }
@@ -489,6 +491,68 @@ static void test_work_flush_unblocked_by_cancel(void)
 	k_thread_abort(&flush_helper);
 }
 
+/* ----------------------------------------------------------------
+ * Upstream return-code parity (submit/schedule/reschedule families)
+ * ---------------------------------------------------------------- */
+
+static void test_work_return_codes_submit_running(void)
+{
+	/* Upstream: submitting a RUNNING item queues it again, retval 2. */
+	struct k_work work;
+	k_work_init(&work, blocking_handler);
+	k_sem_init(&block_sem, 0, 2);
+
+	TEST_ASSERT_EQUAL(1, k_work_submit(&work)); /* idle -> queued */
+	k_msleep(20);                               /* worker parks in handler */
+	TEST_ASSERT_TRUE(k_work_busy_get(&work) & K_WORK_RUNNING);
+
+	TEST_ASSERT_EQUAL(2, k_work_submit(&work)); /* running -> queued again */
+
+	/* Release both executions (the second pops after the first ends). */
+	k_sem_give(&block_sem);
+	k_sem_give(&block_sem);
+	k_work_queue_drain(&k_sys_work_q, false);
+	TEST_ASSERT_EQUAL(0, k_work_busy_get(&work));
+}
+
+static void test_work_return_codes_schedule(void)
+{
+	struct k_work_delayable dwork;
+	k_work_init_delayable(&dwork, test_work_handler);
+	work_executed = 0;
+
+	/* Arm -> 1; second schedule while armed is a no-op -> 0 (and must
+	 * NOT shorten the original deadline). */
+	TEST_ASSERT_EQUAL(1, k_work_schedule(&dwork, K_MSEC(200)));
+	TEST_ASSERT_EQUAL(0, k_work_schedule(&dwork, K_MSEC(10)));
+	k_msleep(50);
+	TEST_ASSERT_EQUAL(0, work_executed); /* 10ms re-arm would have fired */
+
+	/* Reschedule cancels and re-arms -> 1, fires at the new deadline. */
+	TEST_ASSERT_EQUAL(1, k_work_reschedule(&dwork, K_MSEC(10)));
+	k_msleep(100);
+	TEST_ASSERT_EQUAL(1, work_executed);
+
+	/* K_NO_WAIT path delegates to submit: idle -> 1. */
+	TEST_ASSERT_EQUAL(1, k_work_schedule(&dwork, K_NO_WAIT));
+	k_msleep(50);
+	TEST_ASSERT_EQUAL(2, work_executed);
+}
+
+static void test_work_return_codes_errors(void)
+{
+	/* Queue not started -> -ENODEV (upstream). */
+	static struct k_work_q unstarted; /* zero-initialized, never started */
+	struct k_work work;
+	k_work_init(&work, test_work_handler);
+	TEST_ASSERT_EQUAL(-ENODEV, k_work_submit_to_queue(&unstarted, &work));
+
+	/* No handler -> -EINVAL (upstream). */
+	struct k_work no_handler;
+	k_work_init(&no_handler, NULL);
+	TEST_ASSERT_EQUAL(-EINVAL, k_work_submit(&no_handler));
+}
+
 void test_k_work_group(void)
 {
 	RUN_TEST(test_work_submit);
@@ -512,4 +576,7 @@ void test_k_work_group(void)
 	RUN_TEST(test_work_submit_cancel_race);
 	RUN_TEST(test_work_init_macro_static);
 	RUN_TEST(test_work_flush_unblocked_by_cancel);
+	RUN_TEST(test_work_return_codes_submit_running);
+	RUN_TEST(test_work_return_codes_schedule);
+	RUN_TEST(test_work_return_codes_errors);
 }
