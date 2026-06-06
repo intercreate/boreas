@@ -700,6 +700,7 @@ struct k_thread {
 	void *p2;
 	void *p3;
 	bool _start_suspended;       /* self-suspend before entry */
+	bool _completed;             /* entry returned (__atomic_* access only) */
 	struct k_timer _delay_timer; /* used for finite-delay start */
 };
 
@@ -729,6 +730,14 @@ typedef TaskHandle_t k_tid_t;
  * valid tid" contract: failure of the underlying xTaskCreateStatic
  * (only possible on programmer error -- misaligned stack, etc.)
  * triggers __ASSERT rather than returning NULL.
+ *
+ * @note Fire-and-forget threads (never joined or aborted) must use
+ *       static or otherwise permanent storage for @p thread and
+ *       @p stack: after the entry function returns, the kernel still
+ *       references both until k_thread_join() or k_thread_abort()
+ *       reclaims the task (the completed task parks suspended on
+ *       silicon; on linux its TCB awaits idle-task reaping). The
+ *       storage may be reused or freed only after join/abort returns.
  */
 k_tid_t k_thread_create(struct k_thread *thread, StackType_t *stack, size_t stack_size,
 			k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
@@ -741,11 +750,32 @@ void k_thread_name_set(struct k_thread *thread, const char *name);
  *       the POSIX port defers pthread teardown to the idle task, which
  *       dereferences the TCB and per-task port state -- the caller's
  *       k_thread struct and stack must stay valid until that cleanup
- *       runs. Upstream Zephyr's k_thread_abort does not block this way.
+ *       runs. The window is best-effort (sufficient for host test
+ *       runners, not guaranteed under idle starvation). Upstream
+ *       Zephyr's k_thread_abort does not block this way; on silicon
+ *       reclamation is synchronous and does not block.
  */
 void k_thread_abort(struct k_thread *thread);
 void k_thread_suspend(struct k_thread *thread);
 void k_thread_resume(struct k_thread *thread);
+/**
+ * @brief Wait for a thread's entry function to return.
+ *
+ * @note Implemented by polling (FreeRTOS has no native join), so
+ *       wakeup granularity is ~10 ms rather than upstream Zephyr's
+ *       immediate wake. On completion the task is reclaimed before
+ *       returning: on silicon it is deleted synchronously from this
+ *       context, so the caller-owned-memory guarantee is
+ *       deterministic. On the linux target join instead blocks two
+ *       ticks so the POSIX port's idle task can reap the pthread
+ *       while the caller's k_thread struct and stack are still valid
+ *       (see k_thread_abort) -- a best-effort window, sufficient for
+ *       host test runners, NOT a guarantee under idle starvation.
+ *
+ * @note Unlike upstream Zephyr, joining the same thread from multiple
+ *       contexts concurrently (or racing a join against an abort) is
+ *       not synchronized and must not be done.
+ */
 int k_thread_join(struct k_thread *thread, k_timeout_t timeout);
 int k_thread_stack_space_get(struct k_thread *thread, size_t *unused);
 
