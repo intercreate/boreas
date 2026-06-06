@@ -7,8 +7,9 @@ get set up, run tests, and submit changes.
 
 ### Prerequisites
 
-- [ESP-IDF v5.4+](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
-  installed and available on your `PATH`
+- [ESP-IDF v5.4 or v5.5](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
+  installed and available on your `PATH` (both versions are supported and
+  tested in CI)
 - A C compiler toolchain (GCC or Clang) for linux-target builds
 - Git
 
@@ -23,6 +24,18 @@ idf.py build
 ```
 
 All tests should pass with zero failures before you make any changes.
+
+### Recommended: enable the pre-commit hook
+
+The repo ships a pre-commit hook that runs `clang-format` on staged C sources
+so formatting problems are caught before CI. Enable it once per clone:
+
+```bash
+git config core.hooksPath tools/hooks
+```
+
+The hook skips quietly if `clang-format` is not installed; CI enforces
+formatting either way.
 
 ## Development Workflow
 
@@ -60,6 +73,10 @@ linux and ESP32-S3 targets.
 
 Boreas follows [Zephyr's coding style](https://docs.zephyrproject.org/latest/contribute/style/index.html). The repo ships Zephyr's `.clang-format` at the root -- run `clang-format -i` on changed files before submitting.
 
+The canonical clang-format version is **21.x** (CI pins `21.1.8`; major versions
+disagree on a few constructs). If your distro ships an older clang-format:
+`pipx install clang-format==21.1.8`.
+
 - **Formatting**: tabs (8-wide), K&R braces, 100-column soft wrap, `snake_case` identifiers. Enforced by `clang-format`.
 - **Public API naming**: Zephyr conventions (`k_*`, `sys_*`, `device_*`, `z_*` for upstream-mirrored internals). Project-private helpers with no Zephyr analogue use `boreas_*`.
 - **Struct vs typedef**: Types the caller initializes, inspects, or stack-allocates use explicit `struct` (e.g. `struct k_sem`). Opaque handles and callback signatures may `typedef` with `_t`. Don't typedef-hide a struct whose fields callers touch.
@@ -73,7 +90,8 @@ Boreas follows [Zephyr's coding style](https://docs.zephyrproject.org/latest/con
 - Keep PRs focused -- one logical change per PR.
 - Write a clear description of *what* changed and *why*.
 - Reference any related issues (e.g., `Fixes #12`).
-- Ensure CI passes (linux build + test).
+- Ensure CI passes: clang-format check, linux build + test, and esp32s3
+  build, each on ESP-IDF v5.4 and v5.5.
 - Be open to feedback; maintainers may request changes.
 
 ## Reporting Bugs
