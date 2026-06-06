@@ -3,6 +3,7 @@
  * Copyright 2026 Intercreate
  */
 
+#include <errno.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -10,10 +11,12 @@
 #include "zephyr/kernel.h"
 
 /*
- * Note: All threads use xTaskCreateStatic (static TCB + stack).
- * Static tasks must NOT call vTaskDelete(NULL) -- FreeRTOS will try
- * to free() the TCB which isn't heap-allocated. Instead, threads
- * signal completion and suspend; the test cleans up via k_thread_abort.
+ * Note: Entry functions that return terminate the thread (the entry
+ * wrapper marks completion; join/abort reclaims the task, matching
+ * upstream Zephyr). Entry functions that must stay alive for the test
+ * to poke at them (suspend/resume, abort-while-running) park
+ * themselves with vTaskSuspend(NULL) and are cleaned up via
+ * k_thread_abort.
  */
 
 static volatile int thread_ran = 0;
@@ -113,7 +116,8 @@ static void short_entry(void *p1, void *p2, void *p3)
 	(void)p3;
 	k_msleep(50);
 	join_flag = 1;
-	vTaskSuspend(NULL); /* Signal done, suspend -- join detects suspended state */
+	/* Return -- the entry wrapper marks completion; join detects the
+	 * flag and reclaims the task. */
 }
 
 static void test_thread_join(void)
@@ -129,6 +133,37 @@ static void test_thread_join(void)
 	int ret = k_thread_join(&thread, K_SECONDS(2));
 	TEST_ASSERT_EQUAL(0, ret);
 	TEST_ASSERT_EQUAL(1, join_flag);
+	TEST_ASSERT_NULL(thread.handle);
+
+	/* Abort after join must be a harmless no-op */
+	k_thread_abort(&thread);
+}
+
+/* Joining a thread that is suspended (not terminated) must NOT report
+ * completion -- upstream Zephyr blocks until abort or entry return. */
+static void suspended_entry(void *p1, void *p2, void *p3)
+{
+	(void)p1;
+	(void)p2;
+	(void)p3;
+	vTaskSuspend(NULL);
+}
+
+static void test_thread_join_suspended_times_out(void)
+{
+	K_THREAD_STACK_DEFINE(stack, 4096);
+	struct k_thread thread = {0};
+
+	k_thread_create(&thread, stack, K_THREAD_STACK_SIZEOF(stack), suspended_entry, NULL, NULL,
+			NULL, 5, 0, K_NO_WAIT);
+
+	k_msleep(50); /* let it reach the suspend */
+
+	/* K_NO_WAIT on a live thread reports busy (upstream parity) */
+	TEST_ASSERT_EQUAL(-EBUSY, k_thread_join(&thread, K_NO_WAIT));
+
+	int ret = k_thread_join(&thread, K_MSEC(100));
+	TEST_ASSERT_EQUAL(-EAGAIN, ret);
 
 	k_thread_abort(&thread);
 }
@@ -170,7 +205,8 @@ static void deferred_entry(void *p1, void *p2, void *p3)
 	(void)p3;
 	volatile int *flag = (volatile int *)p1;
 	*flag = 1;
-	/* Return — k_thread_entry_wrapper suspends the task for us */
+	/* Return -- the entry wrapper marks completion. The abort that
+	 * follows in each test exercises the already-completed reap path. */
 }
 
 /* Static allocation for deferred tests -- k_thread with embedded k_timer
@@ -285,6 +321,7 @@ void test_k_thread_group(void)
 	RUN_TEST(test_thread_name_set);
 	RUN_TEST(test_thread_abort);
 	RUN_TEST(test_thread_join);
+	RUN_TEST(test_thread_join_suspended_times_out);
 	RUN_TEST(test_thread_three_params);
 	RUN_TEST(test_thread_deferred_forever);
 	RUN_TEST(test_thread_deferred_delay);

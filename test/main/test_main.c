@@ -32,15 +32,14 @@ void test_uptime_group(void);
 void test_sleep_group(void);
 void test_k_timer_group(void);
 void test_k_work_group(void);
+void test_k_thread_group(void);
 void test_k_mutex_pi_group(void);
 void test_k_event_mt_group(void);
 void test_init_group(void);
 void test_k_msgq_mt_group(void);
 
 #if !CONFIG_IDF_TARGET_LINUX
-/* k_thread group skipped on linux (POSIX-port lifecycle bug, see app_main).
- * gpio_flags requires zdevice GPIO types (driver component). */
-void test_k_thread_group(void);
+/* gpio_flags requires zdevice GPIO types (driver component). */
 void test_gpio_flags_group(void);
 #endif
 
@@ -78,26 +77,12 @@ void app_main(void)
 	test_sleep_group();
 
 	/* Layer 2: Timer & Work Queue (before the thread-heavy groups so a
-	 * linux-port thread-lifecycle failure can't mask timer/work results) */
+	 * thread-lifecycle failure can't mask timer/work results) */
 	test_k_timer_group();
 	test_k_work_group();
 
-#if !CONFIG_IDF_TARGET_LINUX
-	/* Layer 1: Thread.
-	 *
-	 * SKIPPED ON LINUX: k_thread create/abort corrupts the FreeRTOS
-	 * POSIX port. vTaskDelete defers pthread teardown to the idle task
-	 * (portCLEAN_UP_TCB -> vPortCancelThread), which dereferences the
-	 * TCB and the port Thread_t stored inside the task's stack buffer
-	 * -- but these tests keep both in function-local storage, and the
-	 * cancelled pthreads are never reaped (cancellation appears
-	 * undeliverable while the port parks threads with all signals
-	 * blocked, at least on macOS hosts). Net effect: dangling TCB list
-	 * nodes get written into dead stack frames and a later task create
-	 * returns through a smashed LR (crash lands at deferred_thread+16,
-	 * the TCB's xStateListItem). */
+	/* Layer 1: Thread */
 	test_k_thread_group();
-#endif
 
 	/* Mutex priority inheritance (needs real scheduling) */
 	test_k_mutex_pi_group();
