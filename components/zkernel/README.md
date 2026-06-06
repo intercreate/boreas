@@ -2,6 +2,37 @@
 
 Zephyr-compatible kernel primitives over FreeRTOS. All objects are statically allocated (no malloc). All blocking APIs handle `K_NO_WAIT`, `K_FOREVER`, and finite timeouts. ISR-safe variants are used automatically where applicable.
 
+## Design principle: object lifetime must be Zephyr-shaped
+
+Upstream Zephyr kernel objects are caller-owned plain structs whose lifecycle
+ends are *synchronous*: when `k_thread_abort`/`k_thread_join`/`k_timer_stop`/
+`k_work_cancel_sync` return, the kernel holds **zero references** into the
+caller's memory — which is what makes stack allocation idiomatic in Zephyr
+code. FreeRTOS assumes the opposite: long-lived objects, handle-based
+ownership, asynchronous teardown (idle-task reaping), and kernel list nodes
+threaded *through* control blocks with no "the kernel is done with this
+memory" signal.
+
+Boreas embeds FreeRTOS control blocks (`StaticTask_t`, `StaticSemaphore_t`,
+…) inside caller-owned Zephyr-shaped structs, importing Zephyr's memory model
+— so every Boreas API that ends an object's kernel involvement MUST sever all
+kernel references before returning (or document loudly where a target port
+makes that impossible). Violations are not theoretical: a parked task whose
+control block outlived its stack frame caused months of intermittent
+scheduler corruption (issues #18, #21 — kernel list operations writing
+through dangling nodes into reused frames). New APIs must be designed against
+this principle, and any divergence belongs in an `@note` on the declaration.
+
+Current status: `k_thread` severs synchronously on silicon and documents the
+linux best-effort window; `k_work`/`k_work_sync` unlink synchronously via
+their own state machine; the k_timer linux backend dequeues synchronously on
+stop; `k_sem`/`k_mutex`/`k_msgq`/`k_event` waiters are unlinked by FreeRTOS
+before the blocking call returns (a *blocked* caller's frame is necessarily
+live, and give/set/put paths finish with the control block before the waiter
+resumes — but do not let a stack-allocated object's frame die while another
+context may still be inside a give/send on it; prefer static storage for
+objects signaled from other contexts).
+
 ## Headers
 
 | Header | Contents |

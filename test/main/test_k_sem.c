@@ -116,12 +116,11 @@ static void test_sem_auto_init_pre_main(void)
 /* ----------------------------------------------------------------
  * Stack-local sem + K_FOREVER + cross-priority give
  *
- * Repro harness for the latent corruption surfaced 2026-04-29 on
- * ESP32-S3 (stack-local sem + K_FOREVER take + higher-priority giver
- * corrupted the waiter's frame across the yield; static sems and
- * same-priority givers were immune). Run EARLY so the rest of the
- * suite acts as the delayed-corruption detector -- the original bug
- * panicked unrelated later tests, not the trigger itself.
+ * Regression harness for the corruption surfaced 2026-04-29 on
+ * ESP32-S3 (root-caused to the pre-#18 k_thread zombie defect, issue
+ * #21 -- see the April-shapes block below). Run EARLY so the rest of
+ * the suite acts as the delayed-corruption detector: the original
+ * bug panicked unrelated later tests, not the trigger itself.
  * ---------------------------------------------------------------- */
 
 K_THREAD_STACK_DEFINE(sem_giver_stack, 4096);
@@ -207,10 +206,16 @@ static void test_sem_stack_forever_timer_giver(void)
 }
 
 /* ----------------------------------------------------------------
- * EXPERIMENT A: faithful reconstruction of the April 2026 crash
- * shapes (devlog/2026-04-29_k_sem_stack_local_kforever_corruption.md).
- * Requires CONFIG_K_TIMER_DISPATCH_ISR=n so expiry gives from
- * ESP_TIMER_TASK in task context (prio ~22) -- the original giver.
+ * Regression: the April 2026 corruption shapes.
+ *
+ * Stack-local timer+sem structs blocking on K_FOREVER takes, given
+ * from the timer expiry context. Root cause was NOT k_sem: parked
+ * tasks from the pre-#18 k_thread lifecycle left dangling
+ * xStateListItem nodes in dead stack frames; frame reuse poisoned
+ * them and later kernel list operations corrupted memory (proven by
+ * injection on the linux target, issue #21). Fixed by #18. These
+ * shapes reproduce the original trigger and must stay green under
+ * either k_timer dispatch mode.
  * ---------------------------------------------------------------- */
 
 /* PR-4's attempted k_timer shape: sem embedded next to the timer in
@@ -274,108 +279,6 @@ static void test_sem_april_periodic_status_sync(void)
 	}
 }
 
-#if CONFIG_IDF_TARGET_LINUX
-/* ----------------------------------------------------------------
- * EXPERIMENT B: zombie-injection mechanism proof.
- *
- * Hypothesis (#21): the April 2026 corruption was the pre-#18
- * k_thread defect -- a parked task whose TCB (and thus its
- * xStateListItem) lived in a DEAD stack frame. Any later insert into
- * the same kernel list (e.g. a K_FOREVER sem take parking the caller
- * on xSuspendedTaskList) makes the kernel WRITE through the dangling
- * node into memory it doesn't own.
- *
- * This test recreates that zombie deliberately with raw FreeRTOS
- * calls, snapshots the dead-frame TCB bytes (never writing them
- * ourselves -- frame depths are controlled so no live local overlaps
- * the region), parks a stack-sem waiter, and memcmp's. A delta is
- * PROOF of the mechanism. A zero delta is INCONCLUSIVE (node
- * adjacency in the shared suspended list isn't guaranteed), not a
- * refutation.
- * ---------------------------------------------------------------- */
-
-static TaskHandle_t zombie_handle;
-static uint8_t *volatile zombie_region;
-
-static void zombie_entry(void *arg)
-{
-	(void)arg;
-	vTaskSuspend(NULL); /* park forever: the pre-#18 zombie shape */
-}
-
-static StackType_t zombie_stack[2048 / sizeof(StackType_t)];
-
-static __attribute__((noinline)) void make_zombie(void)
-{
-	StaticTask_t tcb; /* FUNCTION-LOCAL: becomes the dangling node */
-
-	zombie_handle = xTaskCreateStaticPinnedToCore(zombie_entry, "zombie",
-						      sizeof(zombie_stack) / sizeof(StackType_t),
-						      NULL, 5, zombie_stack, &tcb, 0);
-	TEST_ASSERT_NOT_NULL(zombie_handle);
-	zombie_region = (uint8_t *)&tcb;
-	k_msleep(20); /* let it reach the park */
-	/* Return: tcb now dangles in this dead frame. Deliberate. */
-}
-
-/* Push the zombie's frame deeper than any later live frame so nothing
- * in this test overwrites the region before we inspect it. The pad
- * must exceed the deepest subsequent call chain -- on the POSIX port
- * the waiter's blocking path (k_sem_take -> xQueueSemaphoreTake ->
- * vPortYield -> event_wait -> pthread internals) runs on the same
- * pthread stack, so be generous. A 512 B pad demonstrably was NOT
- * enough: the waiter chain trampled the zombie TCB and vTaskDelete
- * wedged in uxListRemove (which is itself the April mechanism, via
- * frame reuse -- but the surgical kernel-write proof needs the region
- * untouched by us). */
-static void *volatile pad_escape; /* defeats array shrinking/elision */
-
-static __attribute__((noinline)) void call_deep(void (*fn)(void))
-{
-	uint8_t pad[8192];
-
-	pad_escape = pad; /* address escapes: array must exist */
-	memset(pad, 0x5A, sizeof(pad));
-	__asm__ volatile("" ::"r"(pad) : "memory");
-	fn();
-	__asm__ volatile("" ::"r"(pad) : "memory"); /* alive across the call */
-}
-
-static void test_sem_zombie_injection_mechanism(void)
-{
-	static uint8_t snapshot[sizeof(StaticTask_t)];
-
-	call_deep(make_zombie);
-	memcpy(snapshot, zombie_region, sizeof(snapshot));
-
-	/* Park a stack-sem waiter: the suspended-list insert links our
-	 * TCB adjacent to the dangling zombie node, writing into it. */
-	stack_sem_forever_cycle(22);
-
-	int delta = memcmp(snapshot, zombie_region, sizeof(snapshot));
-
-	/* Clean the list BEFORE asserting: delete-other reclaims
-	 * synchronously on silicon and unlinks the dangling node. On the
-	 * POSIX port teardown is idle-deferred and dereferences the TCB
-	 * in this (still live) frame -- give idle its reap window before
-	 * returning, mirroring k_thread_abort. */
-	vTaskDelete(zombie_handle);
-	k_msleep(2 * portTICK_PERIOD_MS);
-
-	if (delta == 0) {
-		TEST_MESSAGE("INCONCLUSIVE: no kernel write landed in the "
-			     "zombie region this run (list adjacency not "
-			     "guaranteed)");
-	} else {
-		TEST_MESSAGE("MECHANISM PROVEN: kernel wrote through the "
-			     "dangling suspended-list node into dead-frame "
-			     "memory");
-	}
-	TEST_PASS(); /* outcome is reported, not asserted -- see above */
-}
-#endif /* CONFIG_IDF_TARGET_LINUX -- the 8K pad would overflow the S3                              \
-	* main task stack; the mechanism is proven on linux. */
-
 void test_k_sem_group(void)
 {
 	RUN_TEST(test_sem_stack_forever_same_prio);
@@ -383,9 +286,6 @@ void test_k_sem_group(void)
 	RUN_TEST(test_sem_stack_forever_timer_giver);
 	RUN_TEST(test_sem_april_oneshot_status_sync);
 	RUN_TEST(test_sem_april_periodic_status_sync);
-#if CONFIG_IDF_TARGET_LINUX
-	RUN_TEST(test_sem_zombie_injection_mechanism);
-#endif
 	RUN_TEST(test_sem_init_and_count);
 	RUN_TEST(test_sem_give_and_take);
 	RUN_TEST(test_sem_take_timeout);
