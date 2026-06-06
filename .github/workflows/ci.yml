@@ -7,10 +7,26 @@ on:
     branches: [main]
 
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: clang-format check
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang-format
+          clang-format --version
+          git ls-files '*.c' '*.h' | xargs clang-format --dry-run -Werror
+
   build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        idf: ["v5.4", "v5.5"]
     runs-on: ubuntu-latest
     container:
-      image: espressif/idf:v5.4
+      image: espressif/idf:${{ matrix.idf }}
 
     steps:
       - uses: actions/checkout@v4
@@ -23,3 +39,23 @@ jobs:
           idf.py --preview set-target linux
           idf.py build
           ./build/boreas_test.elf
+
+  build-esp32s3:
+    strategy:
+      fail-fast: false
+      matrix:
+        idf: ["v5.4", "v5.5"]
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:${{ matrix.idf }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (esp32s3 target, -Werror)
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          cd test
+          idf.py set-target esp32s3
+          idf.py build
