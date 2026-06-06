@@ -116,12 +116,20 @@ void k_work_init(struct k_work *work, k_work_handler_t handler)
 
 static int K_ISR_SAFE k_work_submit_internal(struct k_work_q *queue, struct k_work *work)
 {
+	if (work->handler == NULL) {
+		/* Upstream __ASSERTs here; return -EINVAL instead of
+		 * queueing an item the worker would silently skip. */
+		return -EINVAL;
+	}
+
 	z_work_lock(queue);
 
-	if (__atomic_load_n(&work->flags, __ATOMIC_RELAXED) & K_WORK_QUEUED) {
-		/* Already queued -- idempotent */
+	uint32_t flags = __atomic_load_n(&work->flags, __ATOMIC_RELAXED);
+
+	if (flags & K_WORK_QUEUED) {
+		/* Already queued -- no-op (upstream retval 0) */
 		z_work_unlock(queue);
-		return 1;
+		return 0;
 	}
 
 	__atomic_or_fetch(&work->flags, K_WORK_QUEUED, __ATOMIC_RELAXED);
@@ -132,23 +140,25 @@ static int K_ISR_SAFE k_work_submit_internal(struct k_work_q *queue, struct k_wo
 
 	/* k_sem_give is already ISR-safe (uses xSemaphoreGiveFromISR). */
 	k_sem_give(&queue->sem);
-	return 0;
-}
 
-int K_ISR_SAFE k_work_submit(struct k_work *work)
-{
-	if (!(__atomic_load_n(&k_sys_work_q.flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
-		return -EINVAL;
-	}
-	return k_work_submit_internal(&k_sys_work_q, work);
+	/* Upstream retvals: 1 = was idle, now queued; 2 = was running and
+	 * has been queued again. The RUNNING snapshot was taken under the
+	 * queue lock above; like upstream's under-lock decision it can be
+	 * stale by the time the caller acts on it. */
+	return (flags & K_WORK_RUNNING) ? 2 : 1;
 }
 
 int K_ISR_SAFE k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work)
 {
 	if (!(__atomic_load_n(&queue->flags, __ATOMIC_RELAXED) & Z_WORK_QUEUE_STARTED)) {
-		return -EINVAL;
+		return -ENODEV; /* matches upstream "queue not started" */
 	}
 	return k_work_submit_internal(queue, work);
+}
+
+int K_ISR_SAFE k_work_submit(struct k_work *work)
+{
+	return k_work_submit_to_queue(&k_sys_work_q, work);
 }
 
 bool k_work_cancel(struct k_work *work)
@@ -353,8 +363,12 @@ int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay)
 int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 			      k_timeout_t delay)
 {
-	if (k_work_is_pending(&dwork->work)) {
-		return 0; /* Already scheduled */
+	/* Upstream no-ops (retval 0) when the item is delayed, queued, or
+	 * canceling -- but DOES schedule when it is only running (the next
+	 * occurrence may be scheduled while the current one executes). */
+	if ((k_work_busy_get(&dwork->work) & (uint32_t)~K_WORK_RUNNING) != 0 ||
+	    __atomic_load_n(&dwork->timer.running, __ATOMIC_ACQUIRE)) {
+		return 0; /* already scheduled -- no change */
 	}
 
 	dwork->queue = queue;
@@ -364,7 +378,7 @@ int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *d
 	}
 
 	k_timer_start(&dwork->timer, delay, K_NO_WAIT);
-	return 0;
+	return 1; /* upstream: scheduled (timeout armed) */
 }
 
 int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay)
@@ -383,7 +397,7 @@ int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable 
 	}
 
 	k_timer_start(&dwork->timer, delay, K_NO_WAIT);
-	return 0;
+	return 1; /* upstream: scheduled (timeout armed) */
 }
 
 int k_work_cancel_delayable(struct k_work_delayable *dwork)
@@ -395,7 +409,8 @@ int k_work_cancel_delayable(struct k_work_delayable *dwork)
 
 bool k_work_delayable_is_pending(struct k_work_delayable *dwork)
 {
-	return k_work_is_pending(&dwork->work) || dwork->timer.running;
+	return k_work_is_pending(&dwork->work) ||
+	       __atomic_load_n(&dwork->timer.running, __ATOMIC_ACQUIRE);
 }
 
 int64_t k_work_delayable_remaining_get(struct k_work_delayable *dwork)

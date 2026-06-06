@@ -552,8 +552,30 @@ struct k_work_q {
 #define K_WORK_DEFINE(name, _handler) struct k_work name = K_WORK_INIT(_handler)
 
 void k_work_init(struct k_work *work, k_work_handler_t handler);
-int k_work_submit(struct k_work *work);
+
+/**
+ * Submit a work item to a queue. Return values match upstream Zephyr:
+ *
+ * @retval 0 if already queued (no change)
+ * @retval 1 if it was idle and has been queued
+ * @retval 2 if it was running and has been queued again
+ * @retval -EINVAL if @p work has no handler (upstream asserts on this
+ *         instead of returning)
+ * @retval -ENODEV if the queue has not been started
+ *
+ * @note The "was running" detection (retval 2) is a snapshot taken
+ *       under the queue lock; like upstream's under-lock decision it
+ *       may be stale by the time the caller acts on it.
+ * @note Divergence: a running item submitted to a DIFFERENT queue is
+ *       queued there as requested -- upstream instead redirects it to
+ *       the queue that is running it (preventing parallel execution
+ *       of the same item). Don't submit a possibly-running item to
+ *       another queue.
+ */
 int k_work_submit_to_queue(struct k_work_q *queue, struct k_work *work);
+/** Submit to the system work queue; return values as
+ *  k_work_submit_to_queue(). */
+int k_work_submit(struct k_work *work);
 
 /**
  * Cancel a pending work item.
@@ -587,8 +609,10 @@ bool k_work_is_pending(struct k_work *work);
 int k_work_flush(struct k_work *work, struct k_work_sync *sync);
 int k_work_cancel_sync(struct k_work *work, struct k_work_sync *sync);
 
-/** Snapshot of work item flags. Returns a mask of K_WORK_RUNNING,
- *  K_WORK_CANCELING, K_WORK_QUEUED, K_WORK_DELAYED, K_WORK_FLUSHING. */
+/** Snapshot of the raw work item flags mask. Boreas sets only
+ *  K_WORK_RUNNING, K_WORK_CANCELING, and K_WORK_QUEUED; K_WORK_DELAYED
+ *  and K_WORK_FLUSHING exist for upstream source compatibility but are
+ *  never set (see the mask definitions above). */
 uint32_t k_work_busy_get(const struct k_work *work);
 
 /**
@@ -637,7 +661,7 @@ int k_work_queue_drain(struct k_work_q *queue, bool plug);
  *       constructors -- ESP-IDF iterates .init_array in descending
  *       order, and within a TU the LAST-declared constructor runs
  *       first. The queue IS ready by app_main() and SYS_INIT
- *       callbacks. k_work_submit() returns -EINVAL until then.
+ *       callbacks. k_work_submit() returns -ENODEV until then.
  */
 extern struct k_work_q k_sys_work_q;
 
@@ -661,24 +685,49 @@ struct k_work_delayable {
 	}
 
 void k_work_init_delayable(struct k_work_delayable *dwork, k_work_handler_t handler);
-/** @note Boreas returns 0 on success (upstream Zephyr returns 1 or 2 for different
- * success cases). The K_NO_WAIT path delegates to k_work_submit_to_queue(), which
- * may return negative errno (e.g. -EINVAL if the queue is not started). */
-int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay);
-/** @note Boreas returns 0 on success (upstream Zephyr returns 1 or 2 for different
- * success cases). The K_NO_WAIT path delegates to k_work_submit_to_queue(), which
- * may return negative errno (e.g. -EINVAL if the queue is not started). */
+
+/**
+ * Schedule delayable work on a queue, unless it is already scheduled.
+ * Return values match upstream Zephyr:
+ *
+ * @retval 0 if already delayed, queued, or canceling (no change). An
+ *         item that is only RUNNING is scheduled (the next occurrence
+ *         may be scheduled while the current one executes).
+ * @retval 1 if the timeout was armed
+ * @retval 2 if @p delay is K_NO_WAIT and the work was running and has
+ *         been queued again
+ * @retval -EINVAL / -ENODEV propagated from the K_NO_WAIT submit path
+ *         (see k_work_submit_to_queue())
+ *
+ * @note Unlike upstream (which serializes the decision under a global
+ *       work lock), scheduling or rescheduling the same delayable
+ *       concurrently from multiple contexts is not synchronized and
+ *       must not be done.
+ */
 int k_work_schedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 			      k_timeout_t delay);
-/** @note Boreas returns 0 on success (upstream Zephyr returns 1 or 2 for different
- * success cases). The K_NO_WAIT path delegates to k_work_submit_to_queue(), which
- * may return negative errno (e.g. -EINVAL if the queue is not started). */
-int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay);
-/** @note Boreas returns 0 on success (upstream Zephyr returns 1 or 2 for different
- * success cases). The K_NO_WAIT path delegates to k_work_submit_to_queue(), which
- * may return negative errno (e.g. -EINVAL if the queue is not started). */
+/** Schedule on the system work queue; return values as
+ *  k_work_schedule_for_queue(). */
+int k_work_schedule(struct k_work_delayable *dwork, k_timeout_t delay);
+
+/**
+ * Cancel any existing schedule and (re)schedule. Return values match
+ * upstream Zephyr:
+ *
+ * @retval 1 if the timeout was armed
+ * @retval 2 if @p delay is K_NO_WAIT and the work was running and has
+ *         been queued again
+ * @retval 0 if @p delay is K_NO_WAIT and a queued instance could not
+ *         be cancelled (it was queued again while running) -- nothing
+ *         changed
+ * @retval -EINVAL / -ENODEV propagated from the K_NO_WAIT submit path
+ *         (see k_work_submit_to_queue())
+ */
 int k_work_reschedule_for_queue(struct k_work_q *queue, struct k_work_delayable *dwork,
 				k_timeout_t delay);
+/** Reschedule on the system work queue; return values as
+ *  k_work_reschedule_for_queue(). */
+int k_work_reschedule(struct k_work_delayable *dwork, k_timeout_t delay);
 int k_work_cancel_delayable(struct k_work_delayable *dwork);
 bool k_work_delayable_is_pending(struct k_work_delayable *dwork);
 int64_t k_work_delayable_remaining_get(struct k_work_delayable *dwork);
