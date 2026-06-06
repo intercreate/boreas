@@ -14,8 +14,10 @@ jobs:
 
       - name: clang-format check
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q clang-format
+          # Pinned: clang-format majors disagree on macro-body braced
+          # initializers (18 vs 21 want opposite spacing), so the project
+          # standardizes on one version. Keep in sync with CONTRIBUTING.md.
+          pipx install clang-format==21.1.8
           clang-format --version
           git ls-files '*.c' '*.h' | xargs clang-format --dry-run -Werror
 
