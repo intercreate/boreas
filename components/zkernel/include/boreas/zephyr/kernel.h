@@ -170,64 +170,57 @@ static inline void k_yield(void)
  * Semaphore
  * ---------------------------------------------------------------- */
 
+/* Notification-backed (no FreeRTOS control block): count/limit/waiter
+ * list live here, guarded by the lock; blocking rides direct-to-task
+ * notifications on a reserved index, whose state is kernel-owned. See
+ * the README design principle -- when k_sem_take returns, the kernel
+ * holds no references into this struct. */
 struct k_sem {
-	SemaphoreHandle_t handle;
-	StaticSemaphore_t buffer;
+	uint32_t count;
+	uint32_t limit;
+	sys_dlist_t waiters; /* of z_sem_waiter, caller-stack resident */
+	portMUX_TYPE lock;
 };
 
 /**
- * Statically declare a semaphore and auto-initialize it with the
- * given @p initial count and @p limit before main() runs.
- *
- * Implementation note: FreeRTOS counting semaphores require a runtime
- * xSemaphoreCreateCountingStatic() call, so true compile-time init
- * isn't possible. The macro emits a per-instance constructor that
- * runs at startup.
- *
- * @note ESP-IDF Xtensa caveat: ESP-IDF iterates `.init_array` in
- *       DESCENDING order on Xtensa (see esp_system/startup.c
- *       do_global_ctors). Default-priority user constructors run
- *       BEFORE prioritized ones, and within a single TU the LAST-
- *       declared constructor runs first. Adding a constructor
- *       priority does not help -- prioritized constructors run
- *       AFTER unprioritized ones in the descending iteration. As a
- *       result the K_SEM_DEFINE'd sem is NOT guaranteed ready
- *       inside arbitrary user constructors on ESP-IDF Xtensa. It IS
- *       ready by:
- *         - app_main()
- *         - SYS_INIT() callbacks
- *         - constructors declared earlier in the same TU
- *           (textually) than the K_SEM_DEFINE
- *
- *       For sems consumed from constructor context, prefer manual
- *       k_sem_init() in a SYS_INIT callback.
- *
- * @note Archive-stripping: when this macro expands inside a static
- *       archive, the constructor can be stripped by the linker
- *       unless pulled in via WHOLE_ARCHIVE (idf_component_register
- *       WHOLE_ARCHIVE). User application code typically isn't in
- *       such an archive; library/component code is.
+ * Statically define a fully-initialized semaphore. True compile-time
+ * initializer (matches upstream Zephyr): usable from constructors and
+ * SYS_INIT callbacks without any runtime init step.
  */
-/* Indirection helpers so __LINE__ expands before token-pasting. The
- * line-number-based ctor name avoids generating a file-scope
- * identifier that begins with underscore (reserved by C11 7.1.3) and
- * is robust to caller-supplied names that themselves begin with
- * underscore. Caveat: two K_SEM_DEFINE on the same source line will
- * collide; not expected in practice. */
-#define K_SEM_CONCAT_(a, b)        a##b
-#define K_SEM_CONCAT(a, b)         K_SEM_CONCAT_(a, b)
-#define K_SEM_INIT_CTOR_NAME(line) K_SEM_CONCAT(k_sem_init_ctor_, line)
-
 #define K_SEM_DEFINE(name, _initial, _limit)                                                       \
-	struct k_sem name = {0};                                                                   \
-	__attribute__((constructor)) static void K_SEM_INIT_CTOR_NAME(__LINE__)(void)              \
-	{                                                                                          \
-		k_sem_init(&name, (_initial), (_limit));                                           \
-	}
+	struct k_sem name = {                                                                      \
+		.count = (_initial),                                                               \
+		.limit = (_limit),                                                                 \
+		.waiters = SYS_DLIST_STATIC_INIT(&name.waiters),                                   \
+		.lock = portMUX_INITIALIZER_UNLOCKED,                                              \
+	};                                                                                         \
+	BUILD_ASSERT(((_limit) != 0) && ((_initial) <= (_limit)),                                  \
+		     "K_SEM_DEFINE: limit must be nonzero and >= initial") /* upstream parity */
 
+/**
+ * @retval 0 on success
+ * @retval -EINVAL if @p limit is zero or @p initial_count exceeds it
+ *         (matches upstream)
+ */
 int k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit);
+/**
+ * @retval 0 on success
+ * @retval -EBUSY if K_NO_WAIT and the semaphore was unavailable
+ * @retval -EAGAIN on timeout, or if the semaphore was reset while
+ *         waiting (matches upstream k_sem_reset semantics)
+ *
+ * @note Divergence: a thread blocked in k_sem_take must NOT be
+ *       aborted (k_thread_abort / vTaskDelete). Upstream Zephyr
+ *       unpends an aborted thread from any wait queue; Boreas cannot
+ *       reach into the semaphore's waiter list from abort, so the
+ *       dead thread would leave a dangling waiter node. The same
+ *       applies to aborting a thread that is inside k_sem_give.
+ */
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout);
 void k_sem_give(struct k_sem *sem);
+/** Zero the count and wake all waiters; their takes return -EAGAIN
+ *  (upstream parity -- the previous FreeRTOS-backed implementation
+ *  could only drain the count). */
 void k_sem_reset(struct k_sem *sem);
 unsigned int k_sem_count_get(struct k_sem *sem);
 
@@ -851,6 +844,12 @@ void k_thread_name_set(struct k_thread *thread, const char *name);
  *       runners, not guaranteed under idle starvation). Upstream
  *       Zephyr's k_thread_abort does not block this way; on silicon
  *       reclamation is synchronous and does not block.
+ *
+ * @note Divergence: do not abort a thread that is blocked in
+ *       k_sem_take (or inside k_sem_give) -- upstream unpends aborted
+ *       threads from wait queues; Boreas cannot reach into the
+ *       notification-backed semaphore's waiter list from here (see
+ *       the @note on k_sem_take).
  */
 void k_thread_abort(struct k_thread *thread);
 void k_thread_suspend(struct k_thread *thread);
