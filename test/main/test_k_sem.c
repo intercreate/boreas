@@ -585,7 +585,7 @@ static void test_sem_multi_waiter_conservation(void)
 		TEST_ASSERT_EQUAL(0, k_thread_join(&mw_threads[i], K_SECONDS(2)));
 		TEST_ASSERT_EQUAL(0, mw_result[i]);
 	}
-	TEST_ASSERT_EQUAL(4, mw_next);
+	TEST_ASSERT_EQUAL(4, atomic_get(&mw_next));
 	TEST_ASSERT_EQUAL(0, k_sem_count_get(&mw_sem));
 	TEST_ASSERT_EQUAL(-EBUSY, k_sem_take(&mw_sem, K_NO_WAIT));
 }
