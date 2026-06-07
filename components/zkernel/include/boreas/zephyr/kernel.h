@@ -486,8 +486,11 @@ uint32_t k_timer_status_get(struct k_timer *timer);
  *
  * @note Blocks on the timer's embedded semaphore, woken by expiry or
  *       k_timer_stop (upstream's single-waiter wait-queue model: one
- *       thread waits per timer). Like upstream, a thread blocked here
- *       must not be aborted (see the @note on k_sem_take).
+ *       thread waits per timer).
+ * @note Divergence: a thread blocked here must NOT be aborted.
+ *       Upstream unpends an aborted thread from the timer wait queue;
+ *       Boreas cannot, so the dead thread would leave a dangling
+ *       waiter node (same limitation as k_sem_take -- see its @note).
  */
 uint32_t k_timer_status_sync(struct k_timer *timer);
 
