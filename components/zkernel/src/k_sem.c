@@ -74,6 +74,18 @@ static struct z_sem_waiter *z_sem_pop_waiter(struct k_sem *sem)
 
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 {
+	/* Sample task identity BEFORE taking the lock: uxTaskPriorityGet
+	 * enters FreeRTOS's own critical section, and no FreeRTOS calls
+	 * happen under the sem lock (avoids nested-spinlock ordering
+	 * hazards on SMP). The waiter node lives on THIS stack frame; it
+	 * is only ever linked while we are inside this function, and it
+	 * is unlinked (by the giver or by our timeout path) under the sem
+	 * lock before we return -- synchronous severance by construction. */
+	struct z_sem_waiter w = {
+		.task = xTaskGetCurrentTaskHandle(),
+		.prio = uxTaskPriorityGet(NULL),
+	};
+
 	z_kernel_lock(&sem->lock);
 
 	if (sem->count > 0) {
@@ -86,15 +98,6 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 		z_kernel_unlock(&sem->lock);
 		return -EBUSY;
 	}
-
-	/* The waiter node lives on THIS stack frame. It is only ever
-	 * linked while we are inside this function, and it is unlinked
-	 * (by the giver or by our timeout path) under the sem lock before
-	 * we return -- synchronous severance by construction. */
-	struct z_sem_waiter w = {
-		.task = xTaskGetCurrentTaskHandle(),
-		.prio = uxTaskPriorityGet(NULL),
-	};
 
 	sys_dlist_append(&sem->waiters, &w.node);
 	z_kernel_unlock(&sem->lock);
