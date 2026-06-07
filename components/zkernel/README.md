@@ -28,10 +28,12 @@ linux best-effort window; `k_work`/`k_work_sync` unlink synchronously via
 their own state machine; the k_timer linux backend dequeues synchronously on
 stop; `k_sem`/`k_mutex`/`k_msgq`/`k_event` waiters are unlinked by FreeRTOS
 before the blocking call returns (a *blocked* caller's frame is necessarily
-live, and give/set/put paths finish with the control block before the waiter
-resumes — but do not let a stack-allocated object's frame die while another
-context may still be inside a give/send on it; prefer static storage for
-objects signaled from other contexts).
+live, and the control-block updates that wake a waiter complete before the
+waiter runs — but the giving/sending context may be preempted by the woken
+waiter before its own call returns, and can still touch the control block
+afterwards, especially under SMP. Do not let a stack-allocated object's
+frame die while another context may still be inside a give/send on it;
+prefer static storage for objects signaled from other contexts).
 
 ## Headers
 

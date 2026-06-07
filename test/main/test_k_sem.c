@@ -4,7 +4,6 @@
  */
 
 #include <errno.h>
-#include <string.h>
 
 #include "unity.h"
 #include "zephyr/kernel.h"
@@ -125,15 +124,13 @@ static void test_sem_auto_init_pre_main(void)
 
 K_THREAD_STACK_DEFINE(sem_giver_stack, 4096);
 static struct k_thread sem_giver_thread;
-static struct k_sem *volatile giver_target;
 
 static void sem_giver_entry(void *p1, void *p2, void *p3)
 {
-	(void)p1;
 	(void)p2;
 	(void)p3;
 	k_msleep(30);
-	k_sem_give(giver_target);
+	k_sem_give((struct k_sem *)p1);
 }
 
 /* Each cycle uses a fresh stack frame: take on a STACK-LOCAL sem,
@@ -144,10 +141,9 @@ static void stack_sem_forever_cycle(int giver_prio)
 	struct k_sem sem; /* stack-local: the trigger */
 
 	TEST_ASSERT_EQUAL(0, k_sem_init(&sem, 0, 1));
-	giver_target = &sem;
 
 	k_thread_create(&sem_giver_thread, sem_giver_stack, K_THREAD_STACK_SIZEOF(sem_giver_stack),
-			sem_giver_entry, NULL, NULL, NULL, giver_prio, 0, K_NO_WAIT);
+			sem_giver_entry, &sem, NULL, NULL, giver_prio, 0, K_NO_WAIT);
 
 	TEST_ASSERT_EQUAL(0, k_sem_take(&sem, K_FOREVER));
 	TEST_ASSERT_EQUAL(0, k_thread_join(&sem_giver_thread, K_SECONDS(2)));
