@@ -7,6 +7,15 @@
 
 #include "unity.h"
 #include "zephyr/kernel.h"
+#include "sdkconfig.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+#include "esp_attr.h"
+#include "esp_timer.h"
+#endif
 
 static void test_sem_init_and_count(void)
 {
@@ -364,6 +373,328 @@ static void test_sem_give_wakes_highest_priority_waiter(void)
 	TEST_ASSERT_EQUAL(0, k_thread_join(&sem_hi_thread, K_SECONDS(2)));
 }
 
+/* ----------------------------------------------------------------
+ * #43: timeout-vs-give race stress.
+ *
+ * The consume-the-in-flight-give branch of k_sem_take (woken with
+ * got == 0) and the give-after-timeout latch only execute when a give
+ * collides with the take's timeout edge -- no other test in the suite
+ * ever times out a take while a give is in flight. Sweep the giver's
+ * firing time across the taker's 20 ms timeout (early / same tick /
+ * late) and check the conservation invariants on every outcome:
+ *
+ *   ret == 0       -> the unit was consumed   (count == 0)
+ *   ret == -EAGAIN -> the give landed after the timeout (count == 1)
+ *
+ * and after draining, the reserved notification index must be clean:
+ * an immediate take fails -EBUSY and a short blocking take times out
+ * (a stranded notification would satisfy it instantly).
+ *
+ * The giver is a RAW FreeRTOS task: k_thread_create pins to core 0,
+ * and on multicore targets the giver must run on the other core for
+ * true concurrency in the race windows.
+ * ---------------------------------------------------------------- */
+
+#define STRESS_ITERS 100
+
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+#define STRESS_GIVER_CORE 1
+#else
+#define STRESS_GIVER_CORE 0
+#endif
+
+static struct k_sem stress_sem;
+static struct k_sem stress_go;
+static struct k_sem stress_ack;
+
+static void stress_giver_task(void *arg)
+{
+	(void)arg;
+	for (int i = 0; i < STRESS_ITERS; i++) {
+		k_sem_take(&stress_go, K_FOREVER);
+		/* Sweep across the taker's 20 ms timeout: 18/19 wake the
+		 * taker, 20 lands on the timeout tick (the race), 21/22
+		 * latch into the count after the timeout. */
+		k_msleep(18 + (i % 5));
+		k_sem_give(&stress_sem);
+		k_sem_give(&stress_ack);
+	}
+	vTaskDelete(NULL);
+}
+
+static void test_sem_timeout_vs_give_stress(void)
+{
+	TEST_ASSERT_EQUAL(0, k_sem_init(&stress_sem, 0, 1));
+	TEST_ASSERT_EQUAL(0, k_sem_init(&stress_go, 0, 1));
+	TEST_ASSERT_EQUAL(0, k_sem_init(&stress_ack, 0, 1));
+
+	TEST_ASSERT_EQUAL(pdPASS, xTaskCreatePinnedToCore(stress_giver_task, "sem_stress", 4096,
+							  NULL, 6, NULL, STRESS_GIVER_CORE));
+
+	int timeouts = 0;
+
+	for (int i = 0; i < STRESS_ITERS; i++) {
+		k_sem_give(&stress_go);
+
+		int ret = k_sem_take(&stress_sem, K_MSEC(20));
+
+		/* The ack orders this iteration's give before the checks. */
+		TEST_ASSERT_EQUAL(0, k_sem_take(&stress_ack, K_SECONDS(2)));
+
+		if (ret == 0) {
+			TEST_ASSERT_EQUAL(0, k_sem_count_get(&stress_sem));
+		} else {
+			TEST_ASSERT_EQUAL(-EAGAIN, ret);
+			TEST_ASSERT_EQUAL(1, k_sem_count_get(&stress_sem));
+			TEST_ASSERT_EQUAL(0, k_sem_take(&stress_sem, K_NO_WAIT)); /* drain */
+			timeouts++;
+		}
+
+		/* No stranded notification on the reserved index: an empty
+		 * take must fail both immediately and after blocking. */
+		TEST_ASSERT_EQUAL(-EBUSY, k_sem_take(&stress_sem, K_NO_WAIT));
+		TEST_ASSERT_EQUAL(-EAGAIN, k_sem_take(&stress_sem, K_MSEC(2)));
+	}
+
+	/* The sweep must produce both outcomes or the race was never
+	 * exercised (18/19 ms reliably wake, 21/22 ms reliably latch). */
+	TEST_ASSERT_NOT_EQUAL(0, timeouts);
+	TEST_ASSERT_NOT_EQUAL(STRESS_ITERS, timeouts);
+
+	k_msleep(20); /* let the self-deleting giver be reaped */
+}
+
+/* ----------------------------------------------------------------
+ * #43: give racing the park (give-before-block, not give-before-take).
+ *
+ * A zero-delay giver hammers the windows INSIDE k_sem_take: the
+ * unlock-sample-relock recheck window and the enqueue ->
+ * notification-wait window. On multicore the giver runs concurrently
+ * on the other core; on unicore the higher-priority giver preempts at
+ * the kernel calls inside those windows.
+ * ---------------------------------------------------------------- */
+
+#define PARK_RACE_ITERS 1000
+
+static void park_race_giver_task(void *arg)
+{
+	(void)arg;
+	for (int i = 0; i < PARK_RACE_ITERS; i++) {
+		k_sem_take(&stress_go, K_FOREVER);
+		k_sem_give(&stress_sem); /* zero delay */
+	}
+	vTaskDelete(NULL);
+}
+
+static void test_sem_give_racing_park(void)
+{
+	TEST_ASSERT_EQUAL(0, k_sem_init(&stress_sem, 0, 1));
+	TEST_ASSERT_EQUAL(0, k_sem_init(&stress_go, 0, 1));
+
+	TEST_ASSERT_EQUAL(pdPASS, xTaskCreatePinnedToCore(park_race_giver_task, "park_race", 4096,
+							  NULL, 6, NULL, STRESS_GIVER_CORE));
+
+	for (int i = 0; i < PARK_RACE_ITERS; i++) {
+		k_sem_give(&stress_go);
+		TEST_ASSERT_EQUAL(0, k_sem_take(&stress_sem, K_MSEC(100)));
+	}
+
+	/* Units conserved: every give was consumed by exactly one take. */
+	TEST_ASSERT_EQUAL(0, k_sem_count_get(&stress_sem));
+	TEST_ASSERT_EQUAL(-EBUSY, k_sem_take(&stress_sem, K_NO_WAIT));
+
+	k_msleep(20); /* let the self-deleting giver be reaped */
+}
+
+/* ----------------------------------------------------------------
+ * #43: multi-waiter beyond two -- conservation, FIFO order among
+ * equal priorities, and reset waking 3+.
+ * ---------------------------------------------------------------- */
+
+K_THREAD_STACK_DEFINE(mw_stack0, 4096);
+K_THREAD_STACK_DEFINE(mw_stack1, 4096);
+K_THREAD_STACK_DEFINE(mw_stack2, 4096);
+K_THREAD_STACK_DEFINE(mw_stack3, 4096);
+static struct k_thread mw_threads[4];
+static struct k_sem mw_sem;
+static volatile int mw_result[4];
+static volatile int mw_order[4];
+static volatile int mw_next;
+
+static void mw_waiter_entry(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	int idx = (int)(intptr_t)p1;
+
+	mw_result[idx] = k_sem_take(&mw_sem, K_SECONDS(2));
+	if (mw_result[idx] == 0) {
+		/* Wakes are serialized: the main task sleeps between
+		 * gives, and all waiters share core 0. */
+		mw_order[mw_next++] = idx;
+	}
+}
+
+static void mw_spawn(int idx, k_thread_stack_t *stack, size_t stack_size)
+{
+	k_thread_create(&mw_threads[idx], stack, stack_size, mw_waiter_entry, (void *)(intptr_t)idx,
+			NULL, NULL, 5, 0, K_NO_WAIT);
+}
+
+static void test_sem_multi_waiter_conservation(void)
+{
+	TEST_ASSERT_EQUAL(0, k_sem_init(&mw_sem, 0, 4));
+	mw_next = 0;
+
+	/* 4 waiters park... */
+	mw_spawn(0, mw_stack0, K_THREAD_STACK_SIZEOF(mw_stack0));
+	mw_spawn(1, mw_stack1, K_THREAD_STACK_SIZEOF(mw_stack1));
+	mw_spawn(2, mw_stack2, K_THREAD_STACK_SIZEOF(mw_stack2));
+	mw_spawn(3, mw_stack3, K_THREAD_STACK_SIZEOF(mw_stack3));
+	k_msleep(20);
+
+	/* ...4 gives wake each exactly once, units conserved. */
+	for (int i = 0; i < 4; i++) {
+		k_sem_give(&mw_sem);
+	}
+	for (int i = 0; i < 4; i++) {
+		TEST_ASSERT_EQUAL(0, k_thread_join(&mw_threads[i], K_SECONDS(2)));
+		TEST_ASSERT_EQUAL(0, mw_result[i]);
+	}
+	TEST_ASSERT_EQUAL(4, mw_next);
+	TEST_ASSERT_EQUAL(0, k_sem_count_get(&mw_sem));
+	TEST_ASSERT_EQUAL(-EBUSY, k_sem_take(&mw_sem, K_NO_WAIT));
+}
+
+static void test_sem_equal_priority_waiters_fifo(void)
+{
+	TEST_ASSERT_EQUAL(0, k_sem_init(&mw_sem, 0, 4));
+	mw_next = 0;
+
+	/* Enqueue 3 equal-priority waiters in a known order (the sleeps
+	 * guarantee each is parked before the next spawns). */
+	mw_spawn(0, mw_stack0, K_THREAD_STACK_SIZEOF(mw_stack0));
+	k_msleep(10);
+	mw_spawn(1, mw_stack1, K_THREAD_STACK_SIZEOF(mw_stack1));
+	k_msleep(10);
+	mw_spawn(2, mw_stack2, K_THREAD_STACK_SIZEOF(mw_stack2));
+	k_msleep(10);
+
+	/* Sequential gives must wake them FIFO (z_sem_pop_waiter's
+	 * strict '>' comparison is what preserves enqueue order among
+	 * equal priorities -- this test pins that). */
+	for (int i = 0; i < 3; i++) {
+		k_sem_give(&mw_sem);
+		k_msleep(10);
+	}
+	for (int i = 0; i < 3; i++) {
+		TEST_ASSERT_EQUAL(0, k_thread_join(&mw_threads[i], K_SECONDS(2)));
+	}
+	TEST_ASSERT_EQUAL(0, mw_order[0]);
+	TEST_ASSERT_EQUAL(1, mw_order[1]);
+	TEST_ASSERT_EQUAL(2, mw_order[2]);
+}
+
+static void test_sem_reset_wakes_all_waiters(void)
+{
+	TEST_ASSERT_EQUAL(0, k_sem_init(&mw_sem, 0, 4));
+	mw_next = 0;
+
+	mw_spawn(0, mw_stack0, K_THREAD_STACK_SIZEOF(mw_stack0));
+	mw_spawn(1, mw_stack1, K_THREAD_STACK_SIZEOF(mw_stack1));
+	mw_spawn(2, mw_stack2, K_THREAD_STACK_SIZEOF(mw_stack2));
+	k_msleep(20);
+
+	/* One reset wakes ALL waiters with -EAGAIN (the wake-all loop in
+	 * k_sem_reset is otherwise only tested with a single waiter). */
+	k_sem_reset(&mw_sem);
+
+	for (int i = 0; i < 3; i++) {
+		TEST_ASSERT_EQUAL(0, k_thread_join(&mw_threads[i], K_SECONDS(2)));
+		TEST_ASSERT_EQUAL(-EAGAIN, mw_result[i]);
+	}
+	TEST_ASSERT_EQUAL(0, k_sem_count_get(&mw_sem));
+
+	/* The sem stays functional after the reset. */
+	k_sem_give(&mw_sem);
+	TEST_ASSERT_EQUAL(0, k_sem_take(&mw_sem, K_NO_WAIT));
+}
+
+/* ----------------------------------------------------------------
+ * #43: FromISR give -- real ISR context via k_timer ISR dispatch
+ * (HW only; prior art: the gated tests in test_k_timer.c).
+ * ---------------------------------------------------------------- */
+
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+
+static struct k_sem isr_give_sem;
+static volatile int64_t isr_give_us;
+static volatile bool isr_give_was_isr;
+
+static void IRAM_ATTR sem_isr_give_cb(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	isr_give_was_isr = xPortInIsrContext();
+	isr_give_us = esp_timer_get_time();
+	k_sem_give(&isr_give_sem);
+}
+
+static void test_sem_isr_give_prompt_wake(void)
+{
+	struct k_timer timer;
+
+	TEST_ASSERT_EQUAL(0, k_sem_init(&isr_give_sem, 0, 1));
+	isr_give_us = 0;
+	isr_give_was_isr = false;
+
+	k_timer_init(&timer, sem_isr_give_cb, NULL);
+	/* Mid-tick expiry (10.5 ms at 1000 Hz): if the FromISR give
+	 * failed to request the context switch (portYIELD_FROM_ISR),
+	 * the wake would be deferred to the next tick interrupt,
+	 * ~500 us later -- the latency bound below would fail. */
+	k_timer_start(&timer, K_USEC(10500), K_NO_WAIT);
+
+	TEST_ASSERT_EQUAL(0, k_sem_take(&isr_give_sem, K_FOREVER));
+	int64_t latency_us = esp_timer_get_time() - isr_give_us;
+
+	k_timer_stop(&timer);
+	TEST_ASSERT_TRUE_MESSAGE(isr_give_was_isr, "giver did not run in ISR context");
+	TEST_ASSERT_TRUE_MESSAGE(latency_us < 400, "ISR give did not wake the waiter promptly");
+}
+
+static struct k_sem isr_take_sem;
+static volatile int isr_take_ret1;
+static volatile int isr_take_ret2;
+
+static void IRAM_ATTR sem_isr_take_cb(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	/* Upstream contract: k_sem_take is isr-ok with K_NO_WAIT (the
+	 * K_NO_WAIT paths make no FreeRTOS calls). */
+	isr_take_ret1 = k_sem_take(&isr_take_sem, K_NO_WAIT);
+	isr_take_ret2 = k_sem_take(&isr_take_sem, K_NO_WAIT);
+}
+
+static void test_sem_isr_take_no_wait(void)
+{
+	struct k_timer timer;
+
+	TEST_ASSERT_EQUAL(0, k_sem_init(&isr_take_sem, 1, 1));
+	isr_take_ret1 = 0xbad;
+	isr_take_ret2 = 0xbad;
+
+	k_timer_init(&timer, sem_isr_take_cb, NULL);
+	k_timer_start(&timer, K_MSEC(10), K_NO_WAIT);
+	k_msleep(50);
+	k_timer_stop(&timer);
+
+	TEST_ASSERT_EQUAL(0, isr_take_ret1);
+	TEST_ASSERT_EQUAL(-EBUSY, isr_take_ret2);
+	TEST_ASSERT_EQUAL(0, k_sem_count_get(&isr_take_sem));
+}
+
+#endif /* CONFIG_K_TIMER_DISPATCH_ISR */
+
 void test_k_sem_group(void)
 {
 	RUN_TEST(test_sem_stack_forever_same_prio);
@@ -383,4 +714,13 @@ void test_k_sem_group(void)
 	RUN_TEST(test_sem_init_invalid_args);
 	RUN_TEST(test_sem_reset_wakes_waiter_eagain);
 	RUN_TEST(test_sem_give_wakes_highest_priority_waiter);
+	RUN_TEST(test_sem_timeout_vs_give_stress);
+	RUN_TEST(test_sem_give_racing_park);
+	RUN_TEST(test_sem_multi_waiter_conservation);
+	RUN_TEST(test_sem_equal_priority_waiters_fifo);
+	RUN_TEST(test_sem_reset_wakes_all_waiters);
+#ifdef CONFIG_K_TIMER_DISPATCH_ISR
+	RUN_TEST(test_sem_isr_give_prompt_wake);
+	RUN_TEST(test_sem_isr_take_no_wait);
+#endif
 }
