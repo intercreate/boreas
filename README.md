@@ -21,10 +21,18 @@ Add Boreas to your ESP-IDF project as a git submodule or local path:
 ```bash
 # As submodule
 git submodule add https://github.com/intercreate/boreas.git components/boreas
-
-# In your top-level CMakeLists.txt
-set(EXTRA_COMPONENT_DIRS components/boreas/components)
 ```
+
+```cmake
+# In your top-level CMakeLists.txt (before project.cmake is included)
+set(EXTRA_COMPONENT_DIRS components/boreas/components)
+set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;components/boreas/sdkconfig.boreas")
+```
+
+`sdkconfig.boreas` carries the configuration Boreas requires (with the
+rationale documented inline); a compile-time error names it if missing.
+After adding or updating it, regenerate your config once:
+`rm -rf build sdkconfig && idf.py set-target <target>`.
 
 Then include headers:
 
