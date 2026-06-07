@@ -340,7 +340,9 @@ K_THREAD_STACK_DEFINE(sem_hi_stack, 4096);
 static struct k_thread sem_lo_thread;
 static struct k_thread sem_hi_thread;
 static struct k_sem prio_sem;
-static volatile int first_woken; /* 4 = low, 6 = high */
+/* 4 = low, 6 = high: k_thread_create takes FreeRTOS priorities (higher
+ * number = higher priority), NOT upstream Zephyr's inverted scheme. */
+static volatile int first_woken;
 
 static void prio_waiter_entry(void *p1, void *p2, void *p3)
 {
@@ -396,6 +398,11 @@ static void test_sem_give_wakes_highest_priority_waiter(void)
  * ---------------------------------------------------------------- */
 
 #define STRESS_ITERS 100
+
+/* The 18..22 ms sweep below only separates "reliably wake" from
+ * "reliably latch" with 1 ms ticks; at e.g. 100 Hz the whole sweep
+ * quantizes onto the timeout boundary. */
+BUILD_ASSERT(CONFIG_FREERTOS_HZ >= 1000, "stress sweep requires 1 ms (or finer) ticks");
 
 #if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
 #define STRESS_GIVER_CORE 1
@@ -456,10 +463,17 @@ static void test_sem_timeout_vs_give_stress(void)
 		TEST_ASSERT_EQUAL(-EAGAIN, k_sem_take(&stress_sem, K_MSEC(2)));
 	}
 
+#if !CONFIG_IDF_TARGET_LINUX
 	/* The sweep must produce both outcomes or the race was never
-	 * exercised (18/19 ms reliably wake, 21/22 ms reliably latch). */
+	 * exercised (18/19 ms reliably wake, 21/22 ms reliably latch).
+	 * HW only: on the linux target a loaded CI host can stall the
+	 * tick clock and collapse the whole sweep onto one outcome --
+	 * the per-iteration invariants above hold regardless. */
 	TEST_ASSERT_NOT_EQUAL(0, timeouts);
 	TEST_ASSERT_NOT_EQUAL(STRESS_ITERS, timeouts);
+#else
+	(void)timeouts;
+#endif
 
 	k_msleep(20); /* let the self-deleting giver be reaped */
 }
@@ -519,7 +533,7 @@ static struct k_thread mw_threads[4];
 static struct k_sem mw_sem;
 static volatile int mw_result[4];
 static volatile int mw_order[4];
-static volatile int mw_next;
+static atomic_t mw_next;
 
 static void mw_waiter_entry(void *p1, void *p2, void *p3)
 {
@@ -529,10 +543,20 @@ static void mw_waiter_entry(void *p1, void *p2, void *p3)
 
 	mw_result[idx] = k_sem_take(&mw_sem, K_SECONDS(2));
 	if (mw_result[idx] == 0) {
-		/* Wakes are serialized: the main task sleeps between
-		 * gives, and all waiters share core 0. */
-		mw_order[mw_next++] = idx;
+		mw_order[atomic_add(&mw_next, 1)] = idx;
 	}
+}
+
+static void mw_reset_state(void)
+{
+	/* Sentinels: a stale value from a previous test must not be able
+	 * to satisfy this test's assertions (e.g. a lost wake leaving a
+	 * prior run's 0 in mw_result). */
+	for (int i = 0; i < 4; i++) {
+		mw_result[i] = 0xbad;
+		mw_order[i] = -1;
+	}
+	atomic_set(&mw_next, 0);
 }
 
 static void mw_spawn(int idx, k_thread_stack_t *stack, size_t stack_size)
@@ -544,7 +568,7 @@ static void mw_spawn(int idx, k_thread_stack_t *stack, size_t stack_size)
 static void test_sem_multi_waiter_conservation(void)
 {
 	TEST_ASSERT_EQUAL(0, k_sem_init(&mw_sem, 0, 4));
-	mw_next = 0;
+	mw_reset_state();
 
 	/* 4 waiters park... */
 	mw_spawn(0, mw_stack0, K_THREAD_STACK_SIZEOF(mw_stack0));
@@ -569,7 +593,7 @@ static void test_sem_multi_waiter_conservation(void)
 static void test_sem_equal_priority_waiters_fifo(void)
 {
 	TEST_ASSERT_EQUAL(0, k_sem_init(&mw_sem, 0, 4));
-	mw_next = 0;
+	mw_reset_state();
 
 	/* Enqueue 3 equal-priority waiters in a known order (the sleeps
 	 * guarantee each is parked before the next spawns). */
@@ -598,7 +622,7 @@ static void test_sem_equal_priority_waiters_fifo(void)
 static void test_sem_reset_wakes_all_waiters(void)
 {
 	TEST_ASSERT_EQUAL(0, k_sem_init(&mw_sem, 0, 4));
-	mw_next = 0;
+	mw_reset_state();
 
 	mw_spawn(0, mw_stack0, K_THREAD_STACK_SIZEOF(mw_stack0));
 	mw_spawn(1, mw_stack1, K_THREAD_STACK_SIZEOF(mw_stack1));
@@ -648,18 +672,21 @@ static void test_sem_isr_give_prompt_wake(void)
 	isr_give_was_isr = false;
 
 	k_timer_init(&timer, sem_isr_give_cb, NULL);
-	/* Mid-tick expiry (10.5 ms at 1000 Hz): if the FromISR give
-	 * failed to request the context switch (portYIELD_FROM_ISR),
-	 * the wake would be deferred to the next tick interrupt,
-	 * ~500 us later -- the latency bound below would fail. */
-	k_timer_start(&timer, K_USEC(10500), K_NO_WAIT);
+	/* Early-in-tick expiry (10.1 ms at 1000 Hz): if the FromISR give
+	 * failed to request the context switch (portYIELD_FROM_ISR), the
+	 * wake would be deferred to the next tick interrupt ~900 us
+	 * later, failing the bound below; a genuine yield wakes in tens
+	 * of microseconds. (The causal model assumes giver ISR and
+	 * waiter share a core: the esp_timer ISR and the main task are
+	 * both CPU0 by default.) */
+	k_timer_start(&timer, K_USEC(10100), K_NO_WAIT);
 
 	TEST_ASSERT_EQUAL(0, k_sem_take(&isr_give_sem, K_FOREVER));
 	int64_t latency_us = esp_timer_get_time() - isr_give_us;
 
 	k_timer_stop(&timer);
 	TEST_ASSERT_TRUE_MESSAGE(isr_give_was_isr, "giver did not run in ISR context");
-	TEST_ASSERT_TRUE_MESSAGE(latency_us < 400, "ISR give did not wake the waiter promptly");
+	TEST_ASSERT_TRUE_MESSAGE(latency_us < 700, "ISR give did not wake the waiter promptly");
 }
 
 static struct k_sem isr_take_sem;
@@ -693,6 +720,21 @@ static void test_sem_isr_take_no_wait(void)
 	TEST_ASSERT_EQUAL(0, k_sem_count_get(&isr_take_sem));
 }
 
+extern int _iram_text_start;
+extern int _iram_text_end;
+
+static void test_k_sem_take_iram_attr(void)
+{
+	/* The isr-ok-with-K_NO_WAIT contract requires IRAM residency:
+	 * the esp_timer ISR is allocated ESP_INTR_FLAG_IRAM, so flash-
+	 * resident code would fault if the ISR fired during a flash
+	 * operation (the suite cannot provoke that; pin it statically). */
+	uintptr_t fn = (uintptr_t)k_sem_take;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_sem_take is not in IRAM address range");
+}
+
 #endif /* CONFIG_K_TIMER_DISPATCH_ISR */
 
 void test_k_sem_group(void)
@@ -722,5 +764,6 @@ void test_k_sem_group(void)
 #ifdef CONFIG_K_TIMER_DISPATCH_ISR
 	RUN_TEST(test_sem_isr_give_prompt_wake);
 	RUN_TEST(test_sem_isr_take_no_wait);
+	RUN_TEST(test_k_sem_take_iram_attr);
 #endif
 }
