@@ -215,12 +215,25 @@ int k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit
  *       reach into the semaphore's waiter list from abort, so the
  *       dead thread would leave a dangling waiter node. The same
  *       applies to aborting a thread that is inside k_sem_give.
+ * @note ISR context: legal only with K_NO_WAIT (the upstream
+ *       contract). The K_NO_WAIT paths take only the ISR-safe
+ *       spinlock (no task-notify or blocking FreeRTOS calls), and
+ *       the function is IRAM-resident so the contract holds in
+ *       IRAM-only ISR contexts (e.g. esp_timer ISR dispatch).
+ * @note Divergence: a waiter's priority is sampled when it enqueues;
+ *       k_thread_priority_set on a blocked thread does not re-sort
+ *       the wake order (upstream re-sorts the pend queue).
  */
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout);
+/** Give the semaphore (ISR-safe). Wakes the highest-priority waiter,
+ *  FIFO among equal priorities (upstream wake order). */
 void k_sem_give(struct k_sem *sem);
 /** Zero the count and wake all waiters; their takes return -EAGAIN
  *  (upstream parity -- the previous FreeRTOS-backed implementation
- *  could only drain the count). */
+ *  could only drain the count).
+ *
+ *  @note Task context only -- must not be called from an ISR. Matches
+ *        upstream, whose k_sem_reset is likewise not isr-ok. */
 void k_sem_reset(struct k_sem *sem);
 unsigned int k_sem_count_get(struct k_sem *sem);
 
