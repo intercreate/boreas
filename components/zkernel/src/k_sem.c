@@ -65,7 +65,12 @@ static struct z_sem_waiter *z_sem_pop_waiter(struct k_sem *sem)
 	return best;
 }
 
-int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
+/* IRAM-resident (K_ISR_SAFE): upstream documents k_sem_take as isr-ok
+ * with K_NO_WAIT, and ESP-IDF ISRs that may run while the flash cache
+ * is disabled (esp_timer ISR dispatch is allocated ESP_INTR_FLAG_IRAM)
+ * can only call IRAM code -- without this, the documented contract
+ * would fault during a concurrent flash operation. */
+int K_ISR_SAFE k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 {
 	/* The waiter node lives on THIS stack frame. It is only ever
 	 * linked while we are inside this function, and it is unlinked
