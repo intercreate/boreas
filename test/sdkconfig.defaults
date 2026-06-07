@@ -22,3 +22,6 @@ CONFIG_ZSHELL_CMD_DEVICE=n
 
 # Unity test framework
 CONFIG_UNITY_ENABLE_FLOAT=y
+
+# zkernel k_sem reserves task-notification index 1
+CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2

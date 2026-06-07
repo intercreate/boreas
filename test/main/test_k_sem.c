@@ -84,20 +84,39 @@ static void test_sem_take_no_wait_empty(void)
 }
 
 /* ----------------------------------------------------------------
- * K_SEM_DEFINE auto-init regression test.
+ * K_SEM_DEFINE static-init test.
  *
- * K_SEM_DEFINE must produce a fully-initialized semaphore by the
- * time app_main() runs. We verify the post-startup count matches
- * the macro's `initial` argument and that take/give work without
- * an explicit k_sem_init() call.
- *
- * Note: ESP-IDF Xtensa iterates .init_array in descending order, so
- * we cannot reliably consume the sem from another constructor in
- * the same TU (see K_SEM_DEFINE doxygen). The "ready by app_main"
- * contract is what's actually deliverable; that's what we test.
+ * K_SEM_DEFINE is a true compile-time initializer (upstream parity,
+ * #26): the sem is usable from ANY constructor -- the old
+ * constructor-emitting macro could not guarantee that on ESP-IDF
+ * Xtensa (descending .init_array iteration). ctor_take_result proves
+ * a constructor in this TU can consume the sem before main().
  * ---------------------------------------------------------------- */
 
 K_SEM_DEFINE(auto_sem, 2, 5);
+
+static int ctor_take_result = -1;
+
+__attribute__((constructor)) static void sem_ctor_consumer(void)
+{
+	ctor_take_result = k_sem_take(&auto_sem, K_NO_WAIT);
+	if (ctor_take_result == 0) {
+		k_sem_give(&auto_sem); /* restore for the app_main test */
+	}
+}
+
+static void test_sem_define_usable_in_constructor(void)
+{
+	TEST_ASSERT_EQUAL(0, ctor_take_result);
+}
+
+static void test_sem_init_invalid_args(void)
+{
+	struct k_sem sem;
+
+	TEST_ASSERT_EQUAL(-EINVAL, k_sem_init(&sem, 0, 0));
+	TEST_ASSERT_EQUAL(-EINVAL, k_sem_init(&sem, 6, 5));
+}
 
 static void test_sem_auto_init_pre_main(void)
 {
@@ -275,6 +294,76 @@ static void test_sem_april_periodic_status_sync(void)
 	}
 }
 
+/* ----------------------------------------------------------------
+ * Notification-backed semantics: reset wakes waiters; priority wake
+ * ---------------------------------------------------------------- */
+
+K_THREAD_STACK_DEFINE(sem_reset_stack, 4096);
+static struct k_thread sem_resetter_thread;
+
+static void sem_resetter_entry(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	k_msleep(30);
+	k_sem_reset((struct k_sem *)p1);
+}
+
+static void test_sem_reset_wakes_waiter_eagain(void)
+{
+	struct k_sem sem; /* stack-local: also exercises severance */
+
+	TEST_ASSERT_EQUAL(0, k_sem_init(&sem, 0, 1));
+
+	k_thread_create(&sem_resetter_thread, sem_reset_stack,
+			K_THREAD_STACK_SIZEOF(sem_reset_stack), sem_resetter_entry, &sem, NULL,
+			NULL, 5, 0, K_NO_WAIT);
+
+	/* Blocked take must be woken by the reset with -EAGAIN
+	 * (upstream parity; the FreeRTOS-backed sem could not do this). */
+	TEST_ASSERT_EQUAL(-EAGAIN, k_sem_take(&sem, K_SECONDS(2)));
+	TEST_ASSERT_EQUAL(0, k_sem_count_get(&sem));
+	TEST_ASSERT_EQUAL(0, k_thread_join(&sem_resetter_thread, K_SECONDS(2)));
+}
+
+K_THREAD_STACK_DEFINE(sem_lo_stack, 4096);
+K_THREAD_STACK_DEFINE(sem_hi_stack, 4096);
+static struct k_thread sem_lo_thread;
+static struct k_thread sem_hi_thread;
+static struct k_sem prio_sem;
+static volatile int first_woken; /* 4 = low, 6 = high */
+
+static void prio_waiter_entry(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	if (k_sem_take(&prio_sem, K_SECONDS(2)) == 0 && first_woken == 0) {
+		first_woken = (int)(intptr_t)p1;
+	}
+}
+
+static void test_sem_give_wakes_highest_priority_waiter(void)
+{
+	TEST_ASSERT_EQUAL(0, k_sem_init(&prio_sem, 0, 2));
+	first_woken = 0;
+
+	/* Low-priority waiter enqueues FIRST -- FIFO would wake it. */
+	k_thread_create(&sem_lo_thread, sem_lo_stack, K_THREAD_STACK_SIZEOF(sem_lo_stack),
+			prio_waiter_entry, (void *)(intptr_t)4, NULL, NULL, 4, 0, K_NO_WAIT);
+	k_msleep(20);
+	k_thread_create(&sem_hi_thread, sem_hi_stack, K_THREAD_STACK_SIZEOF(sem_hi_stack),
+			prio_waiter_entry, (void *)(intptr_t)6, NULL, NULL, 6, 0, K_NO_WAIT);
+	k_msleep(20);
+
+	k_sem_give(&prio_sem); /* upstream: highest-priority waiter wins */
+	k_msleep(20);
+	TEST_ASSERT_EQUAL(6, first_woken);
+
+	k_sem_give(&prio_sem); /* release the second waiter */
+	TEST_ASSERT_EQUAL(0, k_thread_join(&sem_lo_thread, K_SECONDS(2)));
+	TEST_ASSERT_EQUAL(0, k_thread_join(&sem_hi_thread, K_SECONDS(2)));
+}
+
 void test_k_sem_group(void)
 {
 	RUN_TEST(test_sem_stack_forever_same_prio);
@@ -290,4 +379,8 @@ void test_k_sem_group(void)
 	RUN_TEST(test_sem_init_at_limit);
 	RUN_TEST(test_sem_take_no_wait_empty);
 	RUN_TEST(test_sem_auto_init_pre_main);
+	RUN_TEST(test_sem_define_usable_in_constructor);
+	RUN_TEST(test_sem_init_invalid_args);
+	RUN_TEST(test_sem_reset_wakes_waiter_eagain);
+	RUN_TEST(test_sem_give_wakes_highest_priority_waiter);
 }
