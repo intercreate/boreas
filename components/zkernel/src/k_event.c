@@ -42,11 +42,21 @@ static uint32_t z_event_match(uint32_t current, uint32_t mask, bool all)
 /* Apply `events` under `mask`, wake every waiter whose condition
  * becomes met (upstream: all satisfied waiters unpend), and return the
  * previous value of the masked events. Satisfied waiters are unlinked
- * into a local chain in ONE lock pass and notified after unlock --
- * touching the stack-resident nodes post-unlock is safe because
- * woken==true forces each waiter into the consume path, where it
- * blocks until our notification lands (same argument as k_sem_give's
- * handle copy, extended to the chained node). */
+ * into a local chain in ONE lock pass and notified after unlock.
+ *
+ * Safety of touching the stack-resident nodes post-unlock: a chained
+ * waiter cannot return from its wait until OUR notification lands.
+ * Within the protocol, exactly one in-flight notification can exist
+ * per blocked waiter -- a waiter is targeted by at most one waker
+ * (unlinking under the lock makes targeting exclusive), and every
+ * return path drains the notification it was woken by (including the
+ * timeout-race consume path). So when woken==true, the only
+ * notification that can release the waiter is ours, sent after we
+ * finish with its node. This premise is the index reservation itself:
+ * external code notifying Z_KERNEL_NOTIFY_INDEX is documented-
+ * forbidden misuse (zkernel_internal.h), under which a stale wake
+ * could release a chained waiter early -- the same premise
+ * k_sem_give's post-unlock handle use rests on. */
 static uint32_t K_ISR_SAFE z_event_post_internal(struct k_event *event, uint32_t events,
 						 uint32_t mask)
 {
@@ -89,17 +99,22 @@ static uint32_t K_ISR_SAFE z_event_post_internal(struct k_event *event, uint32_t
 
 	z_kernel_unlock(&event->lock);
 
+	bool in_isr = xPortInIsrContext();
+	BaseType_t isr_yield = pdFALSE;
+
 	for (n = sys_dlist_get(&woken_chain); n != NULL; n = sys_dlist_get(&woken_chain)) {
 		struct z_event_waiter *w = CONTAINER_OF(n, struct z_event_waiter, node);
 
-		if (xPortInIsrContext()) {
-			BaseType_t woken = pdFALSE;
-
-			vTaskNotifyGiveIndexedFromISR(w->task, Z_KERNEL_NOTIFY_INDEX, &woken);
-			portYIELD_FROM_ISR(woken);
+		if (in_isr) {
+			/* Accumulate across the chain; yield once below. */
+			vTaskNotifyGiveIndexedFromISR(w->task, Z_KERNEL_NOTIFY_INDEX, &isr_yield);
 		} else {
 			xTaskNotifyGiveIndexed(w->task, Z_KERNEL_NOTIFY_INDEX);
 		}
+	}
+
+	if (in_isr) {
+		portYIELD_FROM_ISR(isr_yield);
 	}
 
 	return previous;
