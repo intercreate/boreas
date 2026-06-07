@@ -13,6 +13,17 @@
 
 #include "esp_attr.h"
 
+#if configTASK_NOTIFICATION_ARRAY_ENTRIES < 2
+#error "Boreas zkernel reserves task-notification index 1 for blocking primitives (index 0 stays free for ESP-IDF internals such as esp_ipc/pthread/eth). Add sdkconfig.boreas to SDKCONFIG_DEFAULTS (see the README) or set CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2 in sdkconfig."
+#endif
+
+/* Reserved for zkernel blocking primitives (k_sem, k_event): index 0
+ * is used by ESP-IDF internals. Sharing one index across primitives is
+ * safe -- a task blocks on at most one primitive at a time, and every
+ * blocking call drains in-flight notifications before returning (the
+ * consume-the-in-flight-give protocol). */
+#define Z_KERNEL_NOTIFY_INDEX 1
+
 /* ISR-aware critical section: ESP-IDF needs different macros for ISR
  * vs task context. Inlined to avoid runtime overhead in the common
  * (task) case. */
