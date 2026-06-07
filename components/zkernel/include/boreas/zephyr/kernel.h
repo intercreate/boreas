@@ -216,7 +216,10 @@ int k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit
  *       dead thread would leave a dangling waiter node. The same
  *       applies to aborting a thread that is inside k_sem_give.
  * @note ISR context: legal only with K_NO_WAIT (the upstream
- *       contract). The K_NO_WAIT paths make no FreeRTOS calls.
+ *       contract). The K_NO_WAIT paths take only the ISR-safe
+ *       spinlock (no task-notify or blocking FreeRTOS calls), and
+ *       the function is IRAM-resident so the contract holds in
+ *       IRAM-only ISR contexts (e.g. esp_timer ISR dispatch).
  * @note Divergence: a waiter's priority is sampled when it enqueues;
  *       k_thread_priority_set on a blocked thread does not re-sort
  *       the wake order (upstream re-sorts the pend queue).

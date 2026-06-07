@@ -45,8 +45,9 @@ static void test_event_wait_from_thread(void)
 	memset(&setter_thread, 0, sizeof(setter_thread));
 
 	/* Spawn thread that will set EVT_DONE after 50ms */
-	k_thread_create(&setter_thread, setter_stack, sizeof(setter_stack), event_setter_entry,
-			(void *)(uintptr_t)EVT_DONE, NULL, NULL, 5, 0, K_NO_WAIT);
+	k_thread_create(&setter_thread, setter_stack, K_THREAD_STACK_SIZEOF(setter_stack),
+			event_setter_entry, (void *)(uintptr_t)EVT_DONE, NULL, NULL, 5, 0,
+			K_NO_WAIT);
 
 	/* Block waiting for the event -- should wake when thread sets it */
 	uint32_t got = k_event_wait(&mt_evt, EVT_DONE, false, K_MSEC(500));
@@ -80,7 +81,7 @@ static void test_event_wait_all_from_thread(void)
 	k_event_init(&mt_evt);
 	memset(&setter2_thread, 0, sizeof(setter2_thread));
 
-	k_thread_create(&setter2_thread, setter2_stack, sizeof(setter2_stack),
+	k_thread_create(&setter2_thread, setter2_stack, K_THREAD_STACK_SIZEOF(setter2_stack),
 			event_multi_setter_entry, &mt_evt, NULL, NULL, 5, 0, K_NO_WAIT);
 
 	/* Wait for BOTH bits -- thread sets them ~30ms apart */
@@ -101,8 +102,9 @@ static void test_event_wait_safe_from_thread(void)
 	k_event_init(&mt_evt);
 	memset(&setter_thread, 0, sizeof(setter_thread));
 
-	k_thread_create(&setter_thread, setter_stack, sizeof(setter_stack), event_setter_entry,
-			(void *)(uintptr_t)EVT_DONE, NULL, NULL, 5, 0, K_NO_WAIT);
+	k_thread_create(&setter_thread, setter_stack, K_THREAD_STACK_SIZEOF(setter_stack),
+			event_setter_entry, (void *)(uintptr_t)EVT_DONE, NULL, NULL, 5, 0,
+			K_NO_WAIT);
 
 	/* Block until the setter posts, consuming the matched bits. */
 	uint32_t got = k_event_wait_safe(&mt_evt, EVT_DONE, false, K_MSEC(500));
@@ -189,6 +191,10 @@ static void test_event_post_wakes_all_with_safe_waiter(void)
 
 #define EVT_STRESS_ITERS 100
 
+/* The 18..22 ms sweep below only separates "reliably wake" from
+ * "reliably miss" with 1 ms ticks (see the k_sem stress test). */
+BUILD_ASSERT(CONFIG_FREERTOS_HZ >= 1000, "stress sweep requires 1 ms (or finer) ticks");
+
 #if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
 #define EVT_POSTER_CORE 1
 #else
@@ -249,10 +255,17 @@ static void test_event_timeout_vs_post_stress(void)
 		TEST_ASSERT_EQUAL(0, k_event_wait(&mt_evt, EVT_GO, false, K_MSEC(2)));
 	}
 
+#if !CONFIG_IDF_TARGET_LINUX
 	/* The sweep must produce both outcomes or the race was never
-	 * exercised (18/19 ms reliably wake, 21/22 ms reliably miss). */
+	 * exercised (18/19 ms reliably wake, 21/22 ms reliably miss).
+	 * HW only: on the linux target a loaded CI host can stall the
+	 * tick clock and collapse the whole sweep onto one outcome --
+	 * the per-iteration invariants above hold regardless. */
 	TEST_ASSERT_NOT_EQUAL(0, timeouts);
 	TEST_ASSERT_NOT_EQUAL(EVT_STRESS_ITERS, timeouts);
+#else
+	(void)timeouts;
+#endif
 
 	k_msleep(20); /* let the self-deleting poster be reaped */
 }
@@ -345,6 +358,19 @@ static void test_event_isr_post_wakes_all(void)
 	TEST_ASSERT_TRUE_MESSAGE(evt_isr_was_isr, "poster did not run in ISR context");
 }
 
+extern int _iram_text_start;
+extern int _iram_text_end;
+
+static void test_k_event_wait_iram_attr(void)
+{
+	/* The isr-ok-with-K_NO_WAIT contract (k_event_test rides this)
+	 * requires IRAM residency -- see test_k_sem_take_iram_attr. */
+	uintptr_t fn = (uintptr_t)k_event_wait;
+	TEST_ASSERT_TRUE_MESSAGE(
+		(fn >= (uintptr_t)&_iram_text_start && fn < (uintptr_t)&_iram_text_end),
+		"k_event_wait is not in IRAM address range");
+}
+
 #endif /* CONFIG_K_TIMER_DISPATCH_ISR */
 
 void test_k_event_mt_group(void)
@@ -357,5 +383,6 @@ void test_k_event_mt_group(void)
 	RUN_TEST(test_event_post_wakes_three_waiters);
 #ifdef CONFIG_K_TIMER_DISPATCH_ISR
 	RUN_TEST(test_event_isr_post_wakes_all);
+	RUN_TEST(test_k_event_wait_iram_attr);
 #endif
 }

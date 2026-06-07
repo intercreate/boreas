@@ -147,8 +147,11 @@ uint32_t K_ISR_SAFE k_event_clear(struct k_event *event, uint32_t events)
 	return z_event_post_internal(event, 0, events);
 }
 
-static uint32_t z_event_wait_internal(struct k_event *event, uint32_t events, bool all, bool reset,
-				      bool clear, k_timeout_t timeout)
+/* IRAM-resident (K_ISR_SAFE) like k_sem_take: the wait family is
+ * documented isr-ok with K_NO_WAIT (k_event_test rides it), so it must
+ * be callable from IRAM-only ISR contexts. */
+static uint32_t K_ISR_SAFE z_event_wait_internal(struct k_event *event, uint32_t events, bool all,
+						 bool reset, bool clear, k_timeout_t timeout)
 {
 	/* The waiter node lives on THIS stack frame; it is unlinked under
 	 * the event lock (by a waker or by our timeout path) before we
@@ -245,23 +248,26 @@ static uint32_t z_event_wait_internal(struct k_event *event, uint32_t events, bo
 	}
 }
 
-uint32_t k_event_wait(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout)
+uint32_t K_ISR_SAFE k_event_wait(struct k_event *event, uint32_t events, bool reset,
+				 k_timeout_t timeout)
 {
 	return z_event_wait_internal(event, events, false, reset, false, timeout);
 }
 
-uint32_t k_event_wait_all(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout)
+uint32_t K_ISR_SAFE k_event_wait_all(struct k_event *event, uint32_t events, bool reset,
+				     k_timeout_t timeout)
 {
 	return z_event_wait_internal(event, events, true, reset, false, timeout);
 }
 
-uint32_t k_event_wait_safe(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout)
+uint32_t K_ISR_SAFE k_event_wait_safe(struct k_event *event, uint32_t events, bool reset,
+				      k_timeout_t timeout)
 {
 	return z_event_wait_internal(event, events, false, reset, true, timeout);
 }
 
-uint32_t k_event_wait_all_safe(struct k_event *event, uint32_t events, bool reset,
-			       k_timeout_t timeout)
+uint32_t K_ISR_SAFE k_event_wait_all_safe(struct k_event *event, uint32_t events, bool reset,
+					  k_timeout_t timeout)
 {
 	return z_event_wait_internal(event, events, true, reset, true, timeout);
 }
