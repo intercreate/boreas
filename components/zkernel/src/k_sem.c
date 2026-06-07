@@ -74,29 +74,40 @@ static struct z_sem_waiter *z_sem_pop_waiter(struct k_sem *sem)
 
 int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 {
-	/* Sample task identity BEFORE taking the lock: uxTaskPriorityGet
-	 * enters FreeRTOS's own critical section, and no FreeRTOS calls
-	 * happen under the sem lock (avoids nested-spinlock ordering
-	 * hazards on SMP). The waiter node lives on THIS stack frame; it
-	 * is only ever linked while we are inside this function, and it
-	 * is unlinked (by the giver or by our timeout path) under the sem
-	 * lock before we return -- synchronous severance by construction. */
-	struct z_sem_waiter w = {
-		.task = xTaskGetCurrentTaskHandle(),
-		.prio = uxTaskPriorityGet(NULL),
-	};
+	/* The waiter node lives on THIS stack frame. It is only ever
+	 * linked while we are inside this function, and it is unlinked
+	 * (by the giver or by our timeout path) under the sem lock before
+	 * we return -- synchronous severance by construction. */
+	struct z_sem_waiter w = {0};
 
-	z_kernel_lock(&sem->lock);
+	/* Task identity is sampled OUTSIDE the lock (uxTaskPriorityGet
+	 * enters FreeRTOS's own critical section -- no FreeRTOS calls
+	 * happen under the sem lock), and ONLY on the must-block path:
+	 * the fast paths must work before the scheduler starts (NULL
+	 * current task), which is what makes K_SEM_DEFINE usable from
+	 * constructors. Unlock-sample-relock requires re-checking the
+	 * count, hence the loop. */
+	for (;;) {
+		z_kernel_lock(&sem->lock);
 
-	if (sem->count > 0) {
-		sem->count--;
+		if (sem->count > 0) {
+			sem->count--;
+			z_kernel_unlock(&sem->lock);
+			return 0;
+		}
+
+		if (k_timeout_is_no_wait(timeout)) {
+			z_kernel_unlock(&sem->lock);
+			return -EBUSY;
+		}
+
+		if (w.task != NULL) {
+			break; /* sampled on a previous pass; enqueue under THIS lock */
+		}
+
 		z_kernel_unlock(&sem->lock);
-		return 0;
-	}
-
-	if (k_timeout_is_no_wait(timeout)) {
-		z_kernel_unlock(&sem->lock);
-		return -EBUSY;
+		w.task = xTaskGetCurrentTaskHandle();
+		w.prio = uxTaskPriorityGet(NULL);
 	}
 
 	sys_dlist_append(&sem->waiters, &w.node);
