@@ -196,6 +196,46 @@ static void test_timer_status_sync_wakes_on_stop(void)
 	k_thread_join(&waker_thread, K_FOREVER);
 }
 
+/* #28 regression: the status_sync wake rides a binary sem LATCH, and a
+ * latched give from an expiry nobody was waiting on must not satisfy a
+ * later status_sync early -- after status_get drains the count, sync
+ * must block until the NEXT expiry (the re-check loop in
+ * k_timer_status_sync is what absorbs the stale latch). */
+static void test_timer_status_sync_after_status_get_blocks(void)
+{
+	struct k_timer timer;
+	k_timer_init(&timer, test_timer_cb, NULL);
+
+	/* Expire at least once with NO waiter: the latch is left set. */
+	k_timer_start(&timer, K_MSEC(50), K_MSEC(50));
+	k_msleep(75); /* mid-period: one expiry has landed */
+	TEST_ASSERT_GREATER_OR_EQUAL(1, k_timer_status_get(&timer));
+
+	uint32_t t0 = (uint32_t)k_uptime_get();
+	uint32_t status = k_timer_status_sync(&timer);
+	uint32_t elapsed = (uint32_t)k_uptime_get() - t0;
+
+	TEST_ASSERT_GREATER_OR_EQUAL(1, status);
+	/* Blocked for ~the rest of the period -- an immediate return
+	 * (stale latch honored) would land well under 10 ms. */
+	TEST_ASSERT_GREATER_OR_EQUAL(10, elapsed);
+	TEST_ASSERT_LESS_THAN(200, elapsed);
+
+	k_timer_stop(&timer);
+}
+
+static void test_timer_status_sync_stopped_returns_immediately(void)
+{
+	struct k_timer timer;
+	k_timer_init(&timer, test_timer_cb, NULL);
+
+	/* Upstream: a stopped/never-started timer with status 0 returns 0
+	 * without blocking. */
+	uint32_t t0 = (uint32_t)k_uptime_get();
+	TEST_ASSERT_EQUAL(0, k_timer_status_sync(&timer));
+	TEST_ASSERT_LESS_THAN(10, (uint32_t)k_uptime_get() - t0);
+}
+
 static void test_timer_remaining_ticks(void)
 {
 	struct k_timer timer;
@@ -455,6 +495,8 @@ void test_k_timer_group(void)
 	RUN_TEST(test_timer_status_sync_blocking);
 	RUN_TEST(test_timer_status_sync_already_fired);
 	RUN_TEST(test_timer_status_sync_wakes_on_stop);
+	RUN_TEST(test_timer_status_sync_after_status_get_blocks);
+	RUN_TEST(test_timer_status_sync_stopped_returns_immediately);
 	RUN_TEST(test_timer_remaining_ticks);
 	RUN_TEST(test_timer_expires_ticks);
 	RUN_TEST(test_timer_one_shot_clears_running);

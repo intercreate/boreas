@@ -415,6 +415,10 @@ struct k_timer {
 	k_timer_stop_t stop_fn;
 	void *user_data;
 	uint32_t status; /* expiry count since last status read */
+	/* status_sync wake latch (binary sem, upstream's single-waiter
+	 * model): given after each expiry and by k_timer_stop. The COUNT
+	 * lives in `status`; the sem only carries the wake. */
+	struct k_sem sync_sem;
 	bool running;
 	bool is_periodic;            /* last k_timer_start was periodic; one-shot if false */
 	bool first_interval_pending; /* start-once then switch to periodic */
@@ -429,6 +433,10 @@ struct k_timer {
 	struct k_timer name = {                                                                    \
 		.expiry_fn = (_expiry_fn),                                                         \
 		.stop_fn = (_stop_fn),                                                             \
+		.sync_sem = {.count = 0,                                                           \
+			     .limit = 1,                                                           \
+			     .waiters = SYS_DLIST_STATIC_INIT(&name.sync_sem.waiters),             \
+			     .lock = portMUX_INITIALIZER_UNLOCKED},                                \
 	}
 
 void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_stop_t stop_fn);
@@ -460,15 +468,13 @@ uint32_t k_timer_status_get(struct k_timer *timer);
  * Returns immediately if the count is already non-zero, or if the
  * timer is already stopped.
  *
- * @note Must not be called from an interrupt handler (blocks).
+ * @note Must not be called from an interrupt handler (blocks) --
+ *       matches upstream.
  *
- * @note Boreas implementation polls every k_msleep(1). Upstream
- *       Zephyr blocks the calling thread on a wait queue. Same
- *       caller-visible semantics; the wake granularity here is
- *       bounded by the FreeRTOS tick period (portTICK_PERIOD_MS,
- *       set by CONFIG_FREERTOS_HZ -- 1ms at the Boreas default of
- *       1000 Hz, 10ms at the ESP-IDF Kconfig default of 100 Hz).
- *       A wake can therefore be up to one tick period late.
+ * @note Blocks on the timer's embedded semaphore, woken by expiry or
+ *       k_timer_stop (upstream's single-waiter wait-queue model: one
+ *       thread waits per timer). Like upstream, a thread blocked here
+ *       must not be aborted (see the @note on k_sem_take).
  */
 uint32_t k_timer_status_sync(struct k_timer *timer);
 

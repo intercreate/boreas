@@ -40,6 +40,11 @@ static void K_ISR_SAFE k_timer_esp_callback(void *arg)
 	if (!__atomic_load_n(&timer->is_periodic, __ATOMIC_ACQUIRE)) {
 		__atomic_store_n(&timer->running, false, __ATOMIC_RELEASE);
 	}
+
+	/* Wake a status_sync waiter LAST (upstream wakes at the end of
+	 * its expiration handler, after the expiry callback). ISR-safe
+	 * under both dispatch modes. */
+	k_sem_give(&timer->sync_sem);
 }
 
 void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_stop_t stop_fn)
@@ -53,6 +58,9 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
 	timer->first_interval_pending = false;
 	timer->period_us = 0;
 	timer->handle = NULL;
+	/* Binary: the sem is the status_sync wake latch, not a counter
+	 * (the expiry count lives in timer->status). */
+	(void)k_sem_init(&timer->sync_sem, 0, 1);
 
 	const esp_timer_create_args_t args = {
 		.callback = k_timer_esp_callback,
@@ -133,6 +141,9 @@ void k_timer_stop(struct k_timer *timer)
 		if (timer->stop_fn) {
 			timer->stop_fn(timer);
 		}
+		/* Wake a status_sync waiter (upstream unpends one waiter on
+		 * stop, after invoking the stop function). */
+		k_sem_give(&timer->sync_sem);
 	}
 }
 
@@ -143,18 +154,25 @@ uint32_t k_timer_status_get(struct k_timer *timer)
 
 uint32_t k_timer_status_sync(struct k_timer *timer)
 {
-	/* Block until the timer expires or is stopped. Polls every
-	 * k_msleep(1), which rounds up to one FreeRTOS tick
-	 * (portTICK_PERIOD_MS, set by CONFIG_FREERTOS_HZ -- 1ms at the
-	 * Boreas default of 1000 Hz, 10ms at the ESP-IDF Kconfig default
-	 * of 100 Hz). Caller-visible semantics match upstream Zephyr's
-	 * wait-queue version (block until expiry or stop, return count
-	 * atomically); the divergence is the polling implementation. */
-	while (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) &&
-	       __atomic_load_n(&timer->status, __ATOMIC_ACQUIRE) == 0) {
-		k_msleep(1);
+	/* Upstream shape: return the accumulated count immediately if
+	 * non-zero, or 0 if the timer is stopped; otherwise block until
+	 * expiry or stop. Blocking rides the embedded sync sem, which
+	 * the expiry path and k_timer_stop give (k_sem_give is ISR-safe,
+	 * so this works under both dispatch modes). The sem is a wake
+	 * LATCH, not a counter: a give latched while no waiter was
+	 * blocked makes a later take return early, so re-check and
+	 * re-block in a loop. */
+	for (;;) {
+		uint32_t result = __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
+
+		if (result > 0) {
+			return result;
+		}
+		if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE)) {
+			return 0;
+		}
+		(void)k_sem_take(&timer->sync_sem, K_FOREVER);
 	}
-	return __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
 }
 
 uint32_t k_timer_remaining_get(struct k_timer *timer)
