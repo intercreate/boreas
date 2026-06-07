@@ -169,7 +169,14 @@ uint32_t k_timer_status_sync(struct k_timer *timer)
 			return result;
 		}
 		if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE)) {
-			return 0;
+			/* Re-read, don't return 0: an expiry (or a stop after
+			 * an expiry) may have completed between the exchange
+			 * above and the running load. The callback bumps
+			 * status (RELEASE) before clearing running (RELEASE),
+			 * so a running==false ACQUIRE load is guaranteed to
+			 * observe that increment -- upstream returns the
+			 * count here, never drops it. */
+			return __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
 		}
 		(void)k_sem_take(&timer->sync_sem, K_FOREVER);
 	}
