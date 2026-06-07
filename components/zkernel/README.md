@@ -295,7 +295,16 @@ Ordered initialization. Entries are emplaced into the `.sys_init_entries` linker
 | `CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES` | 32 | Max SYS_INIT registrations |
 | `CONFIG_ZKERNEL_FATAL_CAPTURE` | n | Save fatal context to NVS |
 
-Required FreeRTOS setting: `CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2`
-(or higher) — zkernel reserves task-notification index 1 for its blocking
-primitives; index 0 stays free for ESP-IDF internals. A compile-time `#error`
-fires if unset.
+Required configuration ships in **`sdkconfig.boreas`** at the repo root —
+add it to your project's defaults list (before `project.cmake`):
+
+```cmake
+set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;path/to/boreas/sdkconfig.boreas")
+```
+
+It currently sets `CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2` —
+zkernel reserves task-notification index 1 for its blocking primitives;
+index 0 stays free for ESP-IDF internals. A compile-time `#error` backstops
+the requirement (Kconfig cannot set another component's int symbol
+automatically: `select` is bool-only and cross-component int defaults lose
+the parse-order race).

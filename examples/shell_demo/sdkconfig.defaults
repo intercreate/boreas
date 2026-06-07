@@ -18,6 +18,3 @@ CONFIG_ZSYS_RETRY=y
 
 # SYS_INIT
 CONFIG_ZKERNEL_SYS_INIT=y
-
-# zkernel k_sem reserves task-notification index 1
-CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2

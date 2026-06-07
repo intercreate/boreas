@@ -8,6 +8,9 @@ if("${IDF_TARGET}" STREQUAL "linux")
     set(COMPONENTS main zkernel zsys zshell zdevice)
 endif()
 
+# Boreas required configuration (notification-index reservation etc.)
+set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;${CMAKE_CURRENT_LIST_DIR}/../sdkconfig.boreas")
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 project(boreas_test)
