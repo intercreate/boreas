@@ -25,8 +25,10 @@ this principle, and any divergence belongs in an `@note` on the declaration.
 
 Current status: `k_thread` severs synchronously on silicon and documents the
 linux best-effort window; `k_work`/`k_work_sync` unlink synchronously via
-their own state machine; the k_timer linux backend dequeues synchronously on
-stop; `k_sem`/`k_mutex`/`k_msgq`/`k_event` waiters are unlinked by FreeRTOS
+their own state machine; `k_sem` is notification-backed (nothing of the
+caller's memory ever enters a kernel list); the k_timer linux backend
+dequeues synchronously on stop; `k_mutex`/`k_msgq`/`k_event` waiters are
+unlinked by FreeRTOS
 before the blocking call returns (a *blocked* caller's frame is necessarily
 live, and the control-block updates that wake a waiter complete before the
 waiter runs — but the giving/sending context may be preempted by the woken
@@ -80,9 +82,25 @@ k_sem_count_get(&sem);
 |--------|---------|
 | `0` | Success |
 | `-EBUSY` | Not available (K_NO_WAIT) |
-| `-EAGAIN` | Timeout expired |
+| `-EAGAIN` | Timeout expired, or the semaphore was reset while waiting |
+| `-EINVAL` | `k_sem_init` with `limit == 0` or `initial > limit` |
 
-**ISR-safe:** `k_sem_give` (uses `xSemaphoreGiveFromISR` automatically).
+**Notification-backed** (no FreeRTOS control block): the count and waiter
+list live in the caller-owned struct; blocking rides direct-to-task
+notifications on **reserved index 1** (requires
+`CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES >= 2`, enforced at compile
+time). Consequences:
+
+- `K_SEM_DEFINE` is a true compile-time initializer (usable from any
+  constructor — upstream parity)
+- `k_sem_reset` wakes all waiters with `-EAGAIN` (upstream parity)
+- `k_sem_give` wakes the highest-priority waiter (upstream parity)
+- when `k_sem_take` returns, the kernel holds zero references into the
+  caller's struct — the design principle above, by construction
+
+**ISR-safe:** `k_sem_give` (uses `vTaskNotifyGiveIndexedFromISR`
+automatically). Do not use task-notification index 1 directly in
+application code.
 
 ## Mutex (`k_mutex`)
 
@@ -276,3 +294,17 @@ Ordered initialization. Entries are emplaced into the `.sys_init_entries` linker
 | `CONFIG_ZKERNEL_SYS_INIT` | y | Enable SYS_INIT framework |
 | `CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES` | 32 | Max SYS_INIT registrations |
 | `CONFIG_ZKERNEL_FATAL_CAPTURE` | n | Save fatal context to NVS |
+
+Required configuration ships in **`sdkconfig.boreas`** at the repo root —
+add it to your project's defaults list (before `project.cmake`):
+
+```cmake
+set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;path/to/boreas/sdkconfig.boreas")
+```
+
+It currently sets `CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2` —
+zkernel reserves task-notification index 1 for its blocking primitives;
+index 0 stays free for ESP-IDF internals. A compile-time `#error` backstops
+the requirement (Kconfig cannot set another component's int symbol
+automatically: `select` is bool-only and cross-component int defaults lose
+the parse-order race).

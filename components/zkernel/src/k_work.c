@@ -12,6 +12,8 @@
 #include <errno.h>
 #include "esp_attr.h"
 
+#include "zkernel_internal.h"
+
 /* Internal queue flag (k_work_q.flags). Not exposed in the public
  * header because it's an implementation detail. */
 #define Z_WORK_QUEUE_STARTED BIT(0)
@@ -32,27 +34,6 @@
 
 static StackType_t sys_wq_stack[CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE / sizeof(StackType_t)];
 struct k_work_q k_sys_work_q;
-
-/* Branch-once helpers around portENTER/EXIT_CRITICAL: ESP-IDF needs
- * different macros for ISR vs task context. Inlined to avoid runtime
- * overhead in the common (task) case. */
-static ALWAYS_INLINE void z_work_lock(struct k_work_q *queue)
-{
-	if (xPortInIsrContext()) {
-		portENTER_CRITICAL_ISR(&queue->lock);
-	} else {
-		portENTER_CRITICAL(&queue->lock);
-	}
-}
-
-static ALWAYS_INLINE void z_work_unlock(struct k_work_q *queue)
-{
-	if (xPortInIsrContext()) {
-		portEXIT_CRITICAL_ISR(&queue->lock);
-	} else {
-		portEXIT_CRITICAL(&queue->lock);
-	}
-}
 
 /* ----------------------------------------------------------------
  * Work Queue Thread
@@ -123,7 +104,7 @@ static int K_ISR_SAFE k_work_submit_internal(struct k_work_q *queue, struct k_wo
 		return -EINVAL;
 	}
 
-	z_work_lock(queue);
+	z_kernel_lock(&queue->lock);
 
 	uint32_t flags = __atomic_load_n(&work->flags, __ATOMIC_RELAXED);
 
@@ -131,13 +112,13 @@ static int K_ISR_SAFE k_work_submit_internal(struct k_work_q *queue, struct k_wo
 		/* Rejected while a cancellation is in progress -- checked
 		 * before the already-queued case, matching upstream's
 		 * order. See k_work_cancel_sync(). */
-		z_work_unlock(queue);
+		z_kernel_unlock(&queue->lock);
 		return -EBUSY;
 	}
 
 	if (flags & K_WORK_QUEUED) {
 		/* Already queued -- no-op (upstream retval 0) */
-		z_work_unlock(queue);
+		z_kernel_unlock(&queue->lock);
 		return 0;
 	}
 
@@ -145,9 +126,9 @@ static int K_ISR_SAFE k_work_submit_internal(struct k_work_q *queue, struct k_wo
 	__atomic_store_n(&work->queue, queue, __ATOMIC_RELEASE);
 	sys_dlist_append(&queue->pending, &work->node);
 
-	z_work_unlock(queue);
+	z_kernel_unlock(&queue->lock);
 
-	/* k_sem_give is already ISR-safe (uses xSemaphoreGiveFromISR). */
+	/* k_sem_give is ISR-safe (ISR-aware lock + FromISR notify path). */
 	k_sem_give(&queue->sem);
 
 	/* Upstream retvals: 1 = was idle, now queued; 2 = was running and
@@ -181,7 +162,7 @@ int k_work_cancel(struct k_work *work)
 
 	struct k_work_sync *sync_to_release = NULL;
 
-	z_work_lock(queue);
+	z_kernel_lock(&queue->lock);
 
 	/* Re-validate the queue under lock: between our read of work->queue
 	 * and acquiring this queue's lock, the worker may have popped the
@@ -189,7 +170,7 @@ int k_work_cancel(struct k_work *work)
 	 * queue. We hold the wrong lock for that case; bail rather than
 	 * remove from a list we don't own. Cancel is best-effort. */
 	if (__atomic_load_n(&work->queue, __ATOMIC_RELAXED) != queue) {
-		z_work_unlock(queue);
+		z_kernel_unlock(&queue->lock);
 		return (int)k_work_busy_get(work);
 	}
 
@@ -218,7 +199,7 @@ int k_work_cancel(struct k_work *work)
 		}
 	}
 
-	z_work_unlock(queue);
+	z_kernel_unlock(&queue->lock);
 
 	if (sync_to_release != NULL) {
 		k_sem_give(&sync_to_release->sem);
@@ -341,9 +322,10 @@ int k_work_queue_drain(struct k_work_q *queue, bool plug)
 {
 	(void)plug; /* Boreas does not implement plugging; reserved for upstream parity. */
 
-	/* Sentinel is stack-allocated -- safe because xSemaphoreGive does
-	 * not access the sem after returning, so by the time k_sem_take
-	 * wakes the drain caller, the worker is finished with `s`. */
+	/* Sentinel is stack-allocated -- safe because the notification-
+	 * backed k_sem severs all references before k_sem_take returns,
+	 * so by the time the drain caller wakes, the worker is finished
+	 * with `s`. */
 	struct z_work_drain_sentinel s;
 	k_work_init(&s.work, z_work_drain_handler);
 	k_sem_init(&s.sem, 0, 1);

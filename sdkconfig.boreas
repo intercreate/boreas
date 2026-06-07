@@ -1,0 +1,16 @@
+# Boreas required configuration
+#
+# Add this file to your project's SDKCONFIG_DEFAULTS (before
+# project.cmake is included):
+#
+#     set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;path/to/boreas/sdkconfig.boreas")
+#
+# Kconfig cannot set these automatically from a component: `select` is
+# bool-only, and a component-supplied `default` for an int it does not
+# own loses the parse-order race to the owning component. A compile-time
+# #error backstops each requirement.
+
+# zkernel reserves task-notification index 1 for its blocking
+# primitives (k_sem); index 0 stays free for ESP-IDF internals
+# (esp_ipc, pthread, ethernet/usb drivers).
+CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2
