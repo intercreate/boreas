@@ -21,13 +21,6 @@
 
 #include "zkernel_internal.h"
 
-#if configTASK_NOTIFICATION_ARRAY_ENTRIES < 2
-#error "Boreas zkernel reserves task-notification index 1 for blocking primitives (index 0 stays free for ESP-IDF internals such as esp_ipc/pthread/eth). Set CONFIG_FREERTOS_TASK_NOTIFICATION_ARRAY_ENTRIES=2 (or higher) in sdkconfig."
-#endif
-
-/* Reserved for zkernel: index 0 is used by ESP-IDF internals. */
-#define Z_SEM_NOTIFY_INDEX 1
-
 struct z_sem_waiter {
 	sys_dnode_t node;
 	TaskHandle_t task;
@@ -127,7 +120,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 			wait = (elapsed >= total) ? 0 : (total - elapsed);
 		}
 
-		uint32_t got = ulTaskNotifyTakeIndexed(Z_SEM_NOTIFY_INDEX, pdTRUE, wait);
+		uint32_t got = ulTaskNotifyTakeIndexed(Z_KERNEL_NOTIFY_INDEX, pdTRUE, wait);
 
 		z_kernel_lock(&sem->lock);
 		if (w.woken) {
@@ -141,7 +134,7 @@ int k_sem_take(struct k_sem *sem, k_timeout_t timeout)
 
 			z_kernel_unlock(&sem->lock);
 			if (got == 0) {
-				(void)ulTaskNotifyTakeIndexed(Z_SEM_NOTIFY_INDEX, pdTRUE,
+				(void)ulTaskNotifyTakeIndexed(Z_KERNEL_NOTIFY_INDEX, pdTRUE,
 							      portMAX_DELAY);
 			}
 			return reset ? -EAGAIN : 0;
@@ -185,10 +178,10 @@ void K_ISR_SAFE k_sem_give(struct k_sem *sem)
 		if (xPortInIsrContext()) {
 			BaseType_t woken = pdFALSE;
 
-			vTaskNotifyGiveIndexedFromISR(to_wake, Z_SEM_NOTIFY_INDEX, &woken);
+			vTaskNotifyGiveIndexedFromISR(to_wake, Z_KERNEL_NOTIFY_INDEX, &woken);
 			portYIELD_FROM_ISR(woken);
 		} else {
-			xTaskNotifyGiveIndexed(to_wake, Z_SEM_NOTIFY_INDEX);
+			xTaskNotifyGiveIndexed(to_wake, Z_KERNEL_NOTIFY_INDEX);
 		}
 	}
 }
@@ -215,7 +208,7 @@ void k_sem_reset(struct k_sem *sem)
 		if (to_wake == NULL) {
 			return;
 		}
-		xTaskNotifyGiveIndexed(to_wake, Z_SEM_NOTIFY_INDEX);
+		xTaskNotifyGiveIndexed(to_wake, Z_KERNEL_NOTIFY_INDEX);
 	}
 }
 

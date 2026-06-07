@@ -285,29 +285,68 @@ uint32_t k_msgq_num_free_get(struct k_msgq *msgq);
 
 /* ----------------------------------------------------------------
  * Event
- *
- * BEHAVIORAL DELTA: FreeRTOS EventGroup reserves bits 24-31 for
- * internal use. Only bits 0-23 (24 bits) are available, vs
- * Zephyr's full 32 bits.
  * ---------------------------------------------------------------- */
 
+/* Notification-backed (no FreeRTOS event group): the full 32-bit
+ * events word and the waiter list live here, guarded by the lock --
+ * the old event-group backend capped usable events at 24 bits. See
+ * the README design principle: when a wait returns, the kernel holds
+ * no references into this struct. */
 struct k_event {
-	EventGroupHandle_t handle;
-	StaticEventGroup_t buffer;
+	uint32_t events;
+	sys_dlist_t waiters; /* of z_event_waiter, caller-stack resident */
+	portMUX_TYPE lock;
 };
 
-#define K_EVENT_DEFINE(name) struct k_event name = {0}
+/** Statically define a fully-initialized event object (compile-time
+ *  initializer, matching upstream). */
+#define K_EVENT_DEFINE(name)                                                                       \
+	struct k_event name = {                                                                    \
+		.events = 0,                                                                       \
+		.waiters = SYS_DLIST_STATIC_INIT(&name.waiters),                                   \
+		.lock = portMUX_INITIALIZER_UNLOCKED,                                              \
+	}
 
-int k_event_init(struct k_event *event);
+void k_event_init(struct k_event *event);
+/** Merge (OR) @p events into the tracked set; all waiters whose
+ *  conditions become met wake. @return the previous value of the
+ *  posted events bits. ISR-safe. */
 uint32_t k_event_post(struct k_event *event, uint32_t events);
-/** @note In ISR context, returns 0 on failure (timer command queue full)
- *        rather than the previous event state. FreeRTOS's
- *        xEventGroupSetBitsFromISR defers to the timer daemon and cannot
- *        report the prior bits synchronously. */
+/** REPLACE the tracked set with @p events (upstream semantics --
+ *  setting differs from posting). @return the previous events value.
+ *  ISR-safe. */
 uint32_t k_event_set(struct k_event *event, uint32_t events);
+/** Overwrite only the bits selected by @p events_mask. @return the
+ *  previous value of the masked bits. ISR-safe. */
+uint32_t k_event_set_masked(struct k_event *event, uint32_t events, uint32_t events_mask);
+/** Clear @p events from the tracked set. @return their previous
+ *  value. ISR-safe. */
 uint32_t k_event_clear(struct k_event *event, uint32_t events);
+/**
+ * Wait for ANY of @p events. @p reset zeroes the ENTIRE tracked set
+ * before waiting (upstream semantics). @return the matching events
+ * (left set -- use the _safe variant to consume them), or 0 on
+ * timeout.
+ *
+ * @note Like k_sem_take: blocking is forbidden in ISRs (K_NO_WAIT is
+ *       fine), and a thread blocked here must not be aborted.
+ */
 uint32_t k_event_wait(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout);
+/** As k_event_wait, but requires ALL of @p events. */
 uint32_t k_event_wait_all(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout);
+/** As k_event_wait, but atomically CLEARS the matched events before
+ *  returning (upstream parity). */
+uint32_t k_event_wait_safe(struct k_event *event, uint32_t events, bool reset, k_timeout_t timeout);
+/** As k_event_wait_all, but atomically clears the matched events. */
+uint32_t k_event_wait_all_safe(struct k_event *event, uint32_t events, bool reset,
+			       k_timeout_t timeout);
+
+/** Non-blocking poll: the currently-set events matching
+ *  @p events_mask (not cleared). ISR-safe. */
+static inline uint32_t k_event_test(struct k_event *event, uint32_t events_mask)
+{
+	return k_event_wait(event, events_mask, false, K_NO_WAIT);
+}
 
 /* ----------------------------------------------------------------
  * Timer (over esp_timer)

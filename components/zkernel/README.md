@@ -146,7 +146,14 @@ k_event_wait_all(&evt, 0x07, false, K_MSEC(100));  // wait for ALL
 k_event_clear(&evt, BIT(0));                   // ISR-safe
 ```
 
-**BEHAVIORAL DELTA:** FreeRTOS reserves bits 24-31 for internal use. Only bits 0-23 are available (vs Zephyr's 32 bits).
+**Notification-backed** (no FreeRTOS event group): the full 32-bit events
+word is available (the old event-group backend reserved bits 24-31).
+Upstream semantics throughout: `set` replaces (use `post` to merge),
+mutators return the previous value, `reset` zeroes the whole tracked set
+before waiting, `wait_all` returns 0 on timeout, and the `_safe` wait
+variants atomically consume matched bits. Same blocking architecture and
+caveats as `k_sem` (reserved notification index; do not abort a blocked
+waiter).
 
 ## Timer (`k_timer`)
 
