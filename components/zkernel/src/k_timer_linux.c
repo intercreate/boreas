@@ -110,6 +110,8 @@ static void z_timer_dispatcher(void *arg)
 			if (!__atomic_load_n(&due->is_periodic, __ATOMIC_ACQUIRE)) {
 				__atomic_store_n(&due->running, false, __ATOMIC_RELEASE);
 			}
+			/* Wake a status_sync waiter LAST (see k_timer.c). */
+			k_sem_give(&due->sync_sem);
 			continue; /* more timers may already be due */
 		}
 
@@ -164,6 +166,9 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
 	timer->first_interval_pending = false; /* unused on linux; deadline math is direct */
 	timer->period_us = 0;
 	timer->deadline_us = 0;
+	/* Binary: the sem is the status_sync wake latch, not a counter
+	 * (the expiry count lives in timer->status). */
+	(void)k_sem_init(&timer->sync_sem, 0, 1);
 	timer->node.next = NULL;
 	timer->node.prev = NULL;
 	/* No esp_timer exists on linux; `handle` serves only as the shared
@@ -214,6 +219,9 @@ void k_timer_stop(struct k_timer *timer)
 	if (timer->stop_fn) {
 		timer->stop_fn(timer);
 	}
+	/* Wake a status_sync waiter (upstream unpends one waiter on
+	 * stop, after invoking the stop function). */
+	k_sem_give(&timer->sync_sem);
 }
 
 uint32_t k_timer_status_get(struct k_timer *timer)
@@ -223,13 +231,26 @@ uint32_t k_timer_status_get(struct k_timer *timer)
 
 uint32_t k_timer_status_sync(struct k_timer *timer)
 {
-	/* Same poll-based implementation as the hardware backend in
-	 * k_timer.c -- see the divergence note there. */
-	while (__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE) &&
-	       __atomic_load_n(&timer->status, __ATOMIC_ACQUIRE) == 0) {
-		k_msleep(1);
+	/* Same sem-backed implementation as the hardware backend -- see
+	 * the rationale in k_timer.c. */
+	for (;;) {
+		uint32_t result = __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
+
+		if (result > 0) {
+			return result;
+		}
+		if (!__atomic_load_n(&timer->running, __ATOMIC_ACQUIRE)) {
+			/* Re-read, don't return 0: an expiry (or a stop after
+			 * an expiry) may have completed between the exchange
+			 * above and the running load. The callback bumps
+			 * status (RELEASE) before clearing running (RELEASE),
+			 * so a running==false ACQUIRE load is guaranteed to
+			 * observe that increment -- upstream returns the
+			 * count here, never drops it. */
+			return __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
+		}
+		(void)k_sem_take(&timer->sync_sem, K_FOREVER);
 	}
-	return __atomic_exchange_n(&timer->status, 0, __ATOMIC_ACQ_REL);
 }
 
 /* Locked snapshot of deadline_us: the dispatcher re-arms periodic timers
