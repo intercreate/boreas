@@ -23,6 +23,8 @@
 #include <errno.h>
 #include <string.h>
 
+#include "sdkconfig.h" /* CONFIG_RING_BUFFER_LARGE selects the index width */
+
 #include "zephyr/sys/ring_buffer.h"
 #include "zephyr/sys/util.h"
 
