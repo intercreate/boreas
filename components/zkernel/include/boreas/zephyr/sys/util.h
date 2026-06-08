@@ -137,23 +137,20 @@ extern "C" {
 #endif
 
 /* Upstream places __noinit data in a section the loader does not zero,
- * to save startup cost. Boreas maps it to ordinary (zero-initialized)
- * storage: correct for every current user -- ring_buf, etc., set their
- * own indices in the init step and never rely on uninitialized buffer
- * contents -- at the cost of zeroing the buffer at boot. Mapping to
- * ESP-IDF's __NOINIT_ATTR would wrongly survive deep sleep.
+ * to save startup cost. Boreas maps it to ordinary zero-initialized BSS
+ * rather than ESP-IDF's __NOINIT_ATTR (which is a `.noinit` section
+ * attribute): for the only user, ring_buf, a RING_BUF_DECLARE'd buffer
+ * has its indices zero-initialized by the struct's static initializer
+ * and never reads buffer bytes it has not written, so no-init vs
+ * zero-init is behaviorally invisible. Plain BSS also keeps the shim
+ * free of a section attribute (which does not port cleanly to the
+ * Mach-O host toolchain used for the linux test target).
  *
- * Known limitation: Boreas wires up no `.noinit` linker section, so a
- * user who genuinely needs no-init/retained-RAM semantics (e.g. data
- * preserved across a warm reset) does NOT get them here -- the storage
- * is plain zero-initialized BSS. */
+ * Known limitation: genuine no-init semantics are NOT provided -- code
+ * that needs data left uninitialized (or retained across a warm reset)
+ * must use ESP-IDF's __NOINIT_ATTR / RTC_NOINIT_ATTR directly. */
 #ifndef __noinit
 #define __noinit
-#endif
-
-/* Deprecation attribute (upstream toolchain.h). */
-#ifndef __deprecated
-#define __deprecated __attribute__((deprecated))
 #endif
 
 /* IRAM-safe panic -- triggers an illegal-instruction exception caught by

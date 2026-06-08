@@ -319,6 +319,65 @@ static void test_ring_buf_many_wrap_cycles(void)
 	TEST_ASSERT_TRUE(ring_buf_is_empty(&rb));
 }
 
+/* Fill-to-full / drain-to-empty repeatedly, enough cycles to carry the
+ * uint16_t indices across their 65536 wrap, asserting the full and
+ * empty discriminations AT high `allocated` each cycle. The
+ * many-wrap-cycles test above drains within a 7-byte span so allocated
+ * never approaches capacity; this one holds the buffer completely full
+ * across the index wrap, exercising space_get == 0 / put returning 0
+ * (full) vs is_empty (empty) right where the modular subtraction must
+ * stay unambiguous. */
+static void test_ring_buf_full_empty_across_wrap(void)
+{
+	static uint8_t storage[4096];
+	struct ring_buf rb;
+	uint8_t *dst;
+
+	ring_buf_init(&rb, sizeof(storage), storage);
+
+	/* 4096 bytes/cycle; 40 cycles = 163840 bytes, crossing the 65536
+	 * index wrap ~2.5 times. */
+	for (int cycle = 0; cycle < 40; cycle++) {
+		uint8_t seed = (uint8_t)cycle;
+
+		/* Fill to exactly full via the claim path. */
+		uint32_t total = 0;
+		while (total < sizeof(storage)) {
+			uint32_t n = ring_buf_put_claim(&rb, &dst, sizeof(storage) - total);
+			TEST_ASSERT_NOT_EQUAL(0, n);
+			for (uint32_t i = 0; i < n; i++) {
+				dst[i] = (uint8_t)(seed + total + i);
+			}
+			total += n;
+			TEST_ASSERT_EQUAL(0, ring_buf_put_finish(&rb, n));
+		}
+
+		/* Full: no space, both put paths refuse. */
+		TEST_ASSERT_EQUAL(sizeof(storage), ring_buf_size_get(&rb));
+		TEST_ASSERT_EQUAL(0, ring_buf_space_get(&rb));
+		TEST_ASSERT_FALSE(ring_buf_is_empty(&rb));
+		TEST_ASSERT_EQUAL(0, ring_buf_put_claim(&rb, &dst, 1));
+
+		/* Drain fully, verifying the bytes survived the wrap. */
+		uint32_t got = 0;
+		while (got < sizeof(storage)) {
+			uint8_t *src;
+			uint32_t n = ring_buf_get_claim(&rb, &src, sizeof(storage) - got);
+			TEST_ASSERT_NOT_EQUAL(0, n);
+			for (uint32_t i = 0; i < n; i++) {
+				TEST_ASSERT_EQUAL_UINT8((uint8_t)(seed + got + i), src[i]);
+			}
+			got += n;
+			TEST_ASSERT_EQUAL(0, ring_buf_get_finish(&rb, n));
+		}
+
+		/* Empty: discrimination from the full state above. */
+		TEST_ASSERT_TRUE(ring_buf_is_empty(&rb));
+		TEST_ASSERT_EQUAL(0, ring_buf_size_get(&rb));
+		TEST_ASSERT_EQUAL(sizeof(storage), ring_buf_space_get(&rb));
+	}
+}
+
 /* ----------------------------------------------------------------
  * RING_BUF_DECLARE static instance
  * ---------------------------------------------------------------- */
@@ -354,5 +413,6 @@ void test_ring_buf_group(void)
 	RUN_TEST(test_ring_buf_put_claim_wraps);
 	RUN_TEST(test_ring_buf_put_get_across_wrap);
 	RUN_TEST(test_ring_buf_many_wrap_cycles);
+	RUN_TEST(test_ring_buf_full_empty_across_wrap);
 	RUN_TEST(test_ring_buf_declare_usable);
 }

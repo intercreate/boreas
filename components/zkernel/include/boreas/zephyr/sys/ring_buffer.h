@@ -30,6 +30,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* struct ring_buf's index width is selected by CONFIG_RING_BUFFER_LARGE
+ * below, so the config must be visible wherever this struct is defined
+ * -- include it explicitly rather than relying on a transitive chain
+ * (the library and every consumer must agree on the layout). */
+#include "sdkconfig.h"
+
 #include "zephyr/sys/util.h"
 
 #ifdef __cplusplus
