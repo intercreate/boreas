@@ -137,7 +137,12 @@ extern "C" {
  * storage: correct for every current user -- ring_buf, etc., set their
  * own indices in the init step and never rely on uninitialized buffer
  * contents -- at the cost of zeroing the buffer at boot. Mapping to
- * ESP-IDF's __NOINIT_ATTR would wrongly survive deep sleep. */
+ * ESP-IDF's __NOINIT_ATTR would wrongly survive deep sleep.
+ *
+ * Known limitation: Boreas wires up no `.noinit` linker section, so a
+ * user who genuinely needs no-init/retained-RAM semantics (e.g. data
+ * preserved across a warm reset) does NOT get them here -- the storage
+ * is plain zero-initialized BSS. */
 #ifndef __noinit
 #define __noinit
 #endif

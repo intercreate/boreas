@@ -1,6 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
- * Copyright 2026 Intercreate
+ * Copyright (c) 2015 Intel Corporation   (upstream Zephyr original)
+ * Copyright 2026 Intercreate             (Boreas port)
  *
  * Zephyr-compatible ring buffer. Near-verbatim port of upstream Zephyr
  * lib/utils/ring_buffer.c (Apache-2.0), adapted only for the Boreas
