@@ -66,6 +66,11 @@ static void test_ring_buf_put_saturates_at_capacity(void)
 	TEST_ASSERT_EQUAL(0, ring_buf_space_get(&rb));
 	/* A further put on a full buffer writes nothing. */
 	TEST_ASSERT_EQUAL(0, ring_buf_put(&rb, in, 1));
+
+	/* The zero-copy claim path (what the UART IRQ uses) must also
+	 * report no room: put_claim returns 0 on a full buffer. */
+	uint8_t *dst;
+	TEST_ASSERT_EQUAL(0, ring_buf_put_claim(&rb, &dst, 1));
 }
 
 static void test_ring_buf_get_more_than_available(void)
@@ -271,9 +276,17 @@ static void test_ring_buf_put_get_across_wrap(void)
 
 	/* This 6-byte write starts at offset 5 and wraps the 8-byte buffer. */
 	TEST_ASSERT_EQUAL(6, ring_buf_put(&rb, b, sizeof(b)));
+	/* Accounting must be correct across the wrap: space_get uses the
+	 * other unsigned-subtraction path (put.head - get.tail). */
+	TEST_ASSERT_EQUAL(6, ring_buf_size_get(&rb));
+	TEST_ASSERT_EQUAL(2, ring_buf_space_get(&rb));
+
 	memset(out, 0, sizeof(out));
 	TEST_ASSERT_EQUAL(6, ring_buf_get(&rb, out, sizeof(b)));
 	TEST_ASSERT_EQUAL_UINT8_ARRAY(b, out, sizeof(b));
+	/* Fully drained after the wrap. */
+	TEST_ASSERT_EQUAL(0, ring_buf_size_get(&rb));
+	TEST_ASSERT_EQUAL(8, ring_buf_space_get(&rb));
 }
 
 /* Many wrap cycles exercise base advancement and the unsigned index

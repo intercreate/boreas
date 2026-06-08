@@ -1,6 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
- * Copyright 2026 Intercreate
+ * Copyright (c) 2015 Intel Corporation   (upstream Zephyr original)
+ * Copyright 2026 Intercreate             (Boreas port)
  *
  * Zephyr-compatible ring buffer (sys/ring_buffer.h). Near-verbatim port
  * of upstream Zephyr (include/zephyr/sys/ring_buffer.h,
@@ -87,6 +88,21 @@ static inline void ring_buf_internal_reset(struct ring_buf *buf, ring_buf_idx_t 
 /** @endcond */
 
 /**
+ * @brief Statically initialize a ring buffer for byte data.
+ *
+ * For use in a struct ring_buf initializer with a caller-provided data
+ * area, e.g. `struct ring_buf rb = RING_BUF_INIT(buf, sizeof(buf));`.
+ *
+ * @param buf   Pointer to the data area (uint8_t[]).
+ * @param size8 Size of the data area (in bytes).
+ */
+#define RING_BUF_INIT(buf, size8)                                                                  \
+	{                                                                                          \
+		.buffer = (buf),                                                                   \
+		.size = (size8),                                                                   \
+	}
+
+/**
  * @brief Define and initialize a ring buffer for byte data.
  *
  * This macro establishes a ring buffer of an arbitrary size.
@@ -103,10 +119,7 @@ static inline void ring_buf_internal_reset(struct ring_buf *buf, ring_buf_idx_t 
 #define RING_BUF_DECLARE(name, size8)                                                              \
 	BUILD_ASSERT((size8) <= RING_BUFFER_MAX_SIZE, RING_BUFFER_SIZE_ASSERT_MSG);                \
 	static uint8_t __noinit _ring_buffer_data_##name[size8];                                   \
-	struct ring_buf name = {                                                                   \
-		.buffer = _ring_buffer_data_##name,                                                \
-		.size = size8,                                                                     \
-	}
+	struct ring_buf name = RING_BUF_INIT(_ring_buffer_data_##name, size8)
 
 /**
  * @brief Initialize a ring buffer for byte data.
