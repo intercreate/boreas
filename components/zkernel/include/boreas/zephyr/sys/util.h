@@ -1,8 +1,12 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
- * Copyright 2026 Intercreate
+ * Copyright (c) 2011-2014 Wind River Systems, Inc.   (upstream Zephyr)
+ * Copyright 2026 Intercreate                         (Boreas)
  *
- * Zephyr-compatible utility macros.
+ * Zephyr-compatible utility macros. Most macros here are universal C
+ * idioms (independently written), but the IS_ENABLED machinery (the
+ * _XXXX##/_YYYY token-paste trick) is taken verbatim from upstream
+ * Zephyr, hence the retained upstream copyright.
  */
 
 #pragma once
