@@ -107,6 +107,8 @@ extern "C" {
  * NOT safe from IRAM ISR context (ESP_LOGE + abort are flash-resident).
  * Use k_panic() for unrecoverable errors in ISR/IRAM context. */
 #ifndef __ASSERT
+#include <stdlib.h> /* abort() */
+
 #include "esp_log.h"
 #define __ASSERT(cond, msg)                                                                        \
 	do {                                                                                       \
@@ -115,6 +117,34 @@ extern "C" {
 			abort();                                                                   \
 		}                                                                                  \
 	} while (0)
+#endif
+
+/* Assertion with no message (upstream spelling). */
+#ifndef __ASSERT_NO_MSG
+#define __ASSERT_NO_MSG(cond) __ASSERT((cond), "")
+#endif
+
+/* Branch-prediction hints (upstream toolchain.h). */
+#ifndef likely
+#define likely(x) __builtin_expect(!!(x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+
+/* Upstream places __noinit data in a section the loader does not zero,
+ * to save startup cost. Boreas maps it to ordinary (zero-initialized)
+ * storage: correct for every current user -- ring_buf, etc., set their
+ * own indices in the init step and never rely on uninitialized buffer
+ * contents -- at the cost of zeroing the buffer at boot. Mapping to
+ * ESP-IDF's __NOINIT_ATTR would wrongly survive deep sleep. */
+#ifndef __noinit
+#define __noinit
+#endif
+
+/* Deprecation attribute (upstream toolchain.h). */
+#ifndef __deprecated
+#define __deprecated __attribute__((deprecated))
 #endif
 
 /* IRAM-safe panic -- triggers an illegal-instruction exception caught by
