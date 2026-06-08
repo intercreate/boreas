@@ -182,18 +182,24 @@ struct k_sem {
 	portMUX_TYPE lock;
 };
 
+/* Compile-time k_sem initializer body. @p self must be the sem being
+ * initialized (the waiters list is self-referential). Single source
+ * for K_SEM_DEFINE and embedded sems (K_TIMER_DEFINE). */
+#define Z_SEM_INITIALIZER(self, _initial, _limit)                                                  \
+	{                                                                                          \
+		.count = (_initial),                                                               \
+		.limit = (_limit),                                                                 \
+		.waiters = SYS_DLIST_STATIC_INIT(&(self).waiters),                                 \
+		.lock = portMUX_INITIALIZER_UNLOCKED,                                              \
+	}
+
 /**
  * Statically define a fully-initialized semaphore. True compile-time
  * initializer (matches upstream Zephyr): usable from constructors and
  * SYS_INIT callbacks without any runtime init step.
  */
 #define K_SEM_DEFINE(name, _initial, _limit)                                                       \
-	struct k_sem name = {                                                                      \
-		.count = (_initial),                                                               \
-		.limit = (_limit),                                                                 \
-		.waiters = SYS_DLIST_STATIC_INIT(&name.waiters),                                   \
-		.lock = portMUX_INITIALIZER_UNLOCKED,                                              \
-	};                                                                                         \
+	struct k_sem name = Z_SEM_INITIALIZER(name, _initial, _limit);                             \
 	BUILD_ASSERT(((_limit) != 0) && ((_initial) <= (_limit)),                                  \
 		     "K_SEM_DEFINE: limit must be nonzero and >= initial") /* upstream parity */
 
@@ -415,6 +421,10 @@ struct k_timer {
 	k_timer_stop_t stop_fn;
 	void *user_data;
 	uint32_t status; /* expiry count since last status read */
+	/* status_sync wake latch (binary sem, upstream's single-waiter
+	 * model): given after each expiry and by k_timer_stop. The COUNT
+	 * lives in `status`; the sem only carries the wake. */
+	struct k_sem sync_sem;
 	bool running;
 	bool is_periodic;            /* last k_timer_start was periodic; one-shot if false */
 	bool first_interval_pending; /* start-once then switch to periodic */
@@ -429,8 +439,15 @@ struct k_timer {
 	struct k_timer name = {                                                                    \
 		.expiry_fn = (_expiry_fn),                                                         \
 		.stop_fn = (_stop_fn),                                                             \
+		.sync_sem = Z_SEM_INITIALIZER(name.sync_sem, 0, 1),                                \
 	}
 
+/**
+ * @note Re-initializing a timer while a thread is blocked in
+ *       k_timer_status_sync on it is a caller error (it clobbers the
+ *       embedded semaphore's waiter list) -- the same reuse rule as
+ *       re-initializing a k_sem with a blocked taker.
+ */
 void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_stop_t stop_fn);
 /**
  * @brief Start or restart a timer.
@@ -445,6 +462,10 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
  *          synchronize with an in-flight ISR callback on SMP targets.
  *          On linux, k_timer_stop likewise does not synchronize with a
  *          callback the dispatcher task has already dequeued.
+ *
+ * @note Restarting does NOT wake a thread blocked in
+ *       k_timer_status_sync -- it keeps waiting for the restarted
+ *       timer's first expiry (or a stop), matching upstream.
  */
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period);
 void k_timer_stop(struct k_timer *timer);
@@ -460,15 +481,16 @@ uint32_t k_timer_status_get(struct k_timer *timer);
  * Returns immediately if the count is already non-zero, or if the
  * timer is already stopped.
  *
- * @note Must not be called from an interrupt handler (blocks).
+ * @note Must not be called from an interrupt handler (blocks) --
+ *       matches upstream.
  *
- * @note Boreas implementation polls every k_msleep(1). Upstream
- *       Zephyr blocks the calling thread on a wait queue. Same
- *       caller-visible semantics; the wake granularity here is
- *       bounded by the FreeRTOS tick period (portTICK_PERIOD_MS,
- *       set by CONFIG_FREERTOS_HZ -- 1ms at the Boreas default of
- *       1000 Hz, 10ms at the ESP-IDF Kconfig default of 100 Hz).
- *       A wake can therefore be up to one tick period late.
+ * @note Blocks on the timer's embedded semaphore, woken by expiry or
+ *       k_timer_stop (upstream's single-waiter wait-queue model: one
+ *       thread waits per timer).
+ * @note Divergence: a thread blocked here must NOT be aborted.
+ *       Upstream unpends an aborted thread from the timer wait queue;
+ *       Boreas cannot, so the dead thread would leave a dangling
+ *       waiter node (same limitation as k_sem_take -- see its @note).
  */
 uint32_t k_timer_status_sync(struct k_timer *timer);
 

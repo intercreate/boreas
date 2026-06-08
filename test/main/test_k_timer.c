@@ -196,6 +196,52 @@ static void test_timer_status_sync_wakes_on_stop(void)
 	k_thread_join(&waker_thread, K_FOREVER);
 }
 
+/* #28 regression: the status_sync wake rides a binary sem LATCH, and a
+ * latched give from an expiry nobody was waiting on must not satisfy a
+ * later status_sync early -- after status_get drains the count, sync
+ * must block until the NEXT expiry (the re-check loop in
+ * k_timer_status_sync is what absorbs the stale latch).
+ *
+ * Deterministic shape (review): one-shot expiries only, and t0 is
+ * captured BEFORE the restart -- the new expiry cannot fire earlier
+ * than start+60, so elapsed >= ~60 holds no matter how the host
+ * stalls the test thread (a periodic re-arm racing the entry was
+ * flaky under CI load). A buggy implementation that honors the stale
+ * latch returns 0 with elapsed ~0. */
+static void test_timer_status_sync_after_status_get_blocks(void)
+{
+	struct k_timer timer;
+	k_timer_init(&timer, test_timer_cb, NULL);
+
+	/* One-shot expires with NO waiter: the latch is left set. */
+	k_timer_start(&timer, K_MSEC(20), K_NO_WAIT);
+	k_msleep(40);
+	TEST_ASSERT_EQUAL(1, k_timer_status_get(&timer));
+
+	/* Restart (start does not drain the latch), then sync. */
+	uint32_t t0 = (uint32_t)k_uptime_get();
+	k_timer_start(&timer, K_MSEC(60), K_NO_WAIT);
+	uint32_t status = k_timer_status_sync(&timer);
+	uint32_t elapsed = (uint32_t)k_uptime_get() - t0;
+
+	TEST_ASSERT_EQUAL(1, status);
+	TEST_ASSERT_GREATER_OR_EQUAL(50, elapsed); /* blocked until the NEW expiry */
+
+	k_timer_stop(&timer);
+}
+
+static void test_timer_status_sync_stopped_returns_immediately(void)
+{
+	struct k_timer timer;
+	k_timer_init(&timer, test_timer_cb, NULL);
+
+	/* Upstream: a stopped/never-started timer with status 0 returns 0
+	 * without blocking. */
+	uint32_t t0 = (uint32_t)k_uptime_get();
+	TEST_ASSERT_EQUAL(0, k_timer_status_sync(&timer));
+	TEST_ASSERT_LESS_THAN(10, (uint32_t)k_uptime_get() - t0);
+}
+
 static void test_timer_remaining_ticks(void)
 {
 	struct k_timer timer;
@@ -455,6 +501,8 @@ void test_k_timer_group(void)
 	RUN_TEST(test_timer_status_sync_blocking);
 	RUN_TEST(test_timer_status_sync_already_fired);
 	RUN_TEST(test_timer_status_sync_wakes_on_stop);
+	RUN_TEST(test_timer_status_sync_after_status_get_blocks);
+	RUN_TEST(test_timer_status_sync_stopped_returns_immediately);
 	RUN_TEST(test_timer_remaining_ticks);
 	RUN_TEST(test_timer_expires_ticks);
 	RUN_TEST(test_timer_one_shot_clears_running);
