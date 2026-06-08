@@ -1,9 +1,13 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
- * Copyright 2026 Intercreate
+ * Copyright (c) 2015-2016 Intel Corporation   (upstream Zephyr)
+ * Copyright 2026 Intercreate                  (Boreas)
  *
  * Zephyr-compatible byte-order helpers for little- and big-endian
- * 16- and 32-bit access over byte buffers.
+ * 16- and 32-bit access over byte buffers. The big/little-endian
+ * 32-bit composition mirrors upstream's canonical chaining closely
+ * enough to retain the upstream copyright; the 16-bit leaf functions
+ * are independently written.
  *
  * @note Upstream Zephyr also provides 24/48/64-bit variants
  *       (sys_{get,put}_{le,be}{24,48,64}). These are intentionally
