@@ -4,8 +4,10 @@
  *
  * Zephyr-compatible toolchain shims (upstream <zephyr/toolchain.h>
  * spellings), kept thin so near-verbatim ports can keep their upstream
- * #include shape. All definitions are #ifndef-guarded: a TU that
- * already got a definition elsewhere keeps the first one it saw.
+ * #include shape. Definitions are #ifndef-guarded -- a TU that already
+ * got a definition elsewhere keeps the first one it saw -- EXCEPT
+ * ALWAYS_INLINE, which is intentionally #undef'd and redefined
+ * unconditionally (see the note on it below).
  */
 
 #pragma once
