@@ -17,6 +17,7 @@ void test_byteorder_group(void);
 void test_atomic_group(void);
 void test_ring_buf_group(void);
 void test_k_sem_group(void);
+void test_k_mem_slab_group(void);
 void test_k_mutex_group(void);
 void test_k_msgq_group(void);
 void test_k_event_group(void);
@@ -58,6 +59,7 @@ void app_main(void)
 
 	/* Layer 1: Kernel primitives */
 	test_k_sem_group();
+	test_k_mem_slab_group();
 	test_k_mutex_group();
 	test_k_msgq_group();
 	test_k_event_group();

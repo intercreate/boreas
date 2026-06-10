@@ -6,6 +6,7 @@ set(test_srcs
     "test_byteorder.c"
     "test_atomic.c"
     "test_ring_buf.c"
+    "test_k_mem_slab.c"
     "test_k_sem.c"
     "test_k_mutex.c"
     "test_k_msgq.c"

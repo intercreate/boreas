@@ -6,6 +6,7 @@ set(srcs
     "src/k_thread.c"
     "src/k_work.c"
     "src/ring_buf.c"
+    "src/k_mem_slab.c"
     "src/sys_init.c"
     "src/fatal.c"
 )

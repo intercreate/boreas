@@ -303,6 +303,138 @@ uint32_t k_msgq_num_used_get(struct k_msgq *msgq);
 uint32_t k_msgq_num_free_get(struct k_msgq *msgq);
 
 /* ----------------------------------------------------------------
+ * Memory Slab (fixed-size block allocator)
+ * ---------------------------------------------------------------- */
+
+/* Free blocks are threaded through an intrusive singly-linked list whose
+ * next-pointer lives in each free block's first word (upstream scheme),
+ * so block_size must be >= sizeof(void *) and word-aligned. The block
+ * count and blocking ride the embedded counting semaphore (count = free
+ * blocks); the lock guards the free list and the usage counters. A
+ * K_MEM_SLAB_DEFINE'd slab threads its free list lazily on first use
+ * (upstream threads it from a PRE_KERNEL SYS_INIT, which does not run on
+ * the linux target). */
+struct k_mem_slab {
+	uint8_t *buffer;
+	char *free_list;   /* intrusive: next-ptr in each free block's first word */
+	size_t block_size; /* word-aligned */
+	uint32_t num_blocks;
+	uint32_t num_used;
+	uint32_t max_used;  /* high-water mark (always tracked) */
+	struct k_sem avail; /* counts free blocks; blocks alloc when empty */
+	portMUX_TYPE lock;  /* guards free_list, num_used, max_used, threaded */
+	bool threaded;      /* lazy free-list init done (K_MEM_SLAB_DEFINE) */
+};
+
+/* Round up to a pointer-word boundary -- the free-list next pointer
+ * lives in each block's first word, so block_size and buffer alignment
+ * must be at least sizeof(void *). Matches upstream's WB_UP, so the
+ * same K_MEM_SLAB_DEFINE compiles on 32- and 64-bit targets (the linux
+ * test host) without the caller minding the word size. */
+#define Z_MEM_SLAB_WB_UP(x) ROUND_UP((x), sizeof(void *))
+
+#define Z_MEM_SLAB_INITIALIZER(name, _block_size, _num_blocks)                                     \
+	{                                                                                          \
+		.buffer = _k_mem_slab_buf_##name,                                                  \
+		.free_list = NULL,                                                                 \
+		.block_size = Z_MEM_SLAB_WB_UP(_block_size),                                       \
+		.num_blocks = (_num_blocks),                                                       \
+		.num_used = 0,                                                                     \
+		.max_used = 0,                                                                     \
+		.lock = portMUX_INITIALIZER_UNLOCKED,                                              \
+		.threaded = false,                                                                 \
+	}
+
+#define Z_MEM_SLAB_BUF_DEFINE(name, _block_size, _num_blocks, _align)                              \
+	BUILD_ASSERT(((_align) & ((_align) - 1)) == 0, "align must be a power of 2");              \
+	BUILD_ASSERT(((_block_size) % (_align)) == 0, "block_size must be a multiple of align");   \
+	static uint8_t __attribute__((aligned(Z_MEM_SLAB_WB_UP(                                    \
+		_align)))) _k_mem_slab_buf_##name[(_num_blocks) * Z_MEM_SLAB_WB_UP(_block_size)]
+
+/**
+ * Statically define and initialize a memory slab. Usable without an
+ * explicit k_mem_slab_init() -- the free list is threaded on first
+ * alloc/free. @p _block_size and the buffer alignment are rounded up to
+ * a pointer-word boundary (upstream WB_UP), so the stored block size may
+ * exceed @p _block_size.
+ *
+ * @note First use of a DEFINE'd slab should be from thread context (the
+ *       one-time lazy init is not guaranteed IRAM-safe); for slabs first
+ *       touched from an ISR, call k_mem_slab_init() at startup instead.
+ *
+ * @param name        Name of the slab.
+ * @param _block_size Size of each block in bytes (multiple of @p _align).
+ * @param _num_blocks Number of blocks.
+ * @param _align      Block/buffer alignment (power of 2).
+ */
+#define K_MEM_SLAB_DEFINE(name, _block_size, _num_blocks, _align)                                  \
+	Z_MEM_SLAB_BUF_DEFINE(name, _block_size, _num_blocks, _align);                             \
+	struct k_mem_slab name = Z_MEM_SLAB_INITIALIZER(name, _block_size, _num_blocks)
+
+/** As K_MEM_SLAB_DEFINE, but file-local (adds `static`). */
+#define K_MEM_SLAB_DEFINE_STATIC(name, _block_size, _num_blocks, _align)                           \
+	Z_MEM_SLAB_BUF_DEFINE(name, _block_size, _num_blocks, _align);                             \
+	static struct k_mem_slab name = Z_MEM_SLAB_INITIALIZER(name, _block_size, _num_blocks)
+
+/**
+ * Initialize a memory slab over a caller-provided buffer.
+ *
+ * @param slab       Slab to initialize.
+ * @param buffer     Backing storage, @p block_size * @p num_blocks bytes,
+ *                   word-aligned.
+ * @param block_size Size of each block (word-aligned, >= sizeof(void *)).
+ * @param num_blocks Number of blocks (>= 1).
+ *
+ * @retval 0 on success.
+ * @retval -EINVAL if @p block_size or @p buffer is not word-aligned,
+ *         @p block_size or @p num_blocks is zero, or the size math
+ *         overflows.
+ */
+int k_mem_slab_init(struct k_mem_slab *slab, void *buffer, size_t block_size, uint32_t num_blocks);
+
+/**
+ * Allocate a block.
+ *
+ * @param slab    Slab to allocate from.
+ * @param mem     Set to the block address on success, NULL otherwise.
+ * @param timeout Wait period if no block is free.
+ *
+ * @retval 0 on success (@p mem is uninitialized memory -- not zeroed).
+ * @retval -ENOMEM if K_NO_WAIT and no block was free.
+ * @retval -EAGAIN if the timeout expired before a block became free.
+ * @retval -EINVAL if a DEFINE'd slab's parameters are invalid (caught on
+ *         the first-use lazy init).
+ *
+ * @note ISR context: legal only with K_NO_WAIT (upstream contract).
+ * @note A thread blocked here must NOT be aborted (see k_sem_take).
+ */
+int k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeout_t timeout);
+
+/**
+ * Free a previously allocated block. ISR-safe. Wakes the highest-priority
+ * thread waiting in k_mem_slab_alloc, which receives this block.
+ */
+void k_mem_slab_free(struct k_mem_slab *slab, void *mem);
+
+/** Number of blocks currently allocated. */
+static inline uint32_t k_mem_slab_num_used_get(struct k_mem_slab *slab)
+{
+	return slab->num_used;
+}
+
+/** Number of blocks currently free. */
+static inline uint32_t k_mem_slab_num_free_get(struct k_mem_slab *slab)
+{
+	return slab->num_blocks - slab->num_used;
+}
+
+/** Maximum number of blocks ever simultaneously allocated (high-water mark). */
+static inline uint32_t k_mem_slab_max_used_get(struct k_mem_slab *slab)
+{
+	return slab->max_used;
+}
+
+/* ----------------------------------------------------------------
  * Event
  * ---------------------------------------------------------------- */
 
