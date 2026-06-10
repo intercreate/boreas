@@ -8,20 +8,34 @@
  * lib/utils/ring_buffer.c -- both Apache-2.0), adapted only for the
  * Boreas include layout and toolchain shims (see sys/util.h).
  *
- * Divergence: the upstream item-mode API (ring_buf_item_put/_get,
- * ring_buf_item_init, RING_BUF_ITEM_DECLARE*) is intentionally NOT
- * ported -- it is @deprecated upstream ("use <zephyr/sys/ringq.h>")
- * and the byte-mode API below is what the UART IRQ pattern, the
- * direct-UART shell transport, and the modbus serial backend use.
+ * Divergences:
+ *   - the upstream item-mode API (ring_buf_item_put/_get,
+ *     ring_buf_item_init, RING_BUF_ITEM_DECLARE*) is intentionally NOT
+ *     ported -- it is @deprecated upstream ("use <zephyr/sys/ringq.h>")
+ *     and the byte-mode API below is what the UART IRQ pattern, the
+ *     direct-UART shell transport, and the modbus serial backend use;
+ *   - the implementation functions are K_ISR_SAFE (IRAM-resident) so
+ *     the byte API is callable from ESP_INTR_FLAG_IRAM ISRs -- see
+ *     src/ring_buf.c.
  *
- * Concurrency (unchanged from upstream): the buffer is lock-free for a
- * SINGLE producer and a SINGLE consumer in separate contexts (two
- * threads, or thread + ISR) -- the producer touches only `put` (and
- * reads `get.tail`); the consumer touches only `get` (and reads
- * `put.tail`). Multiple producers OR multiple consumers must serialize
- * access externally (e.g. a k_mutex or by locking interrupts). On SMP,
- * pair the buffer with a k_sem to establish ordering between producer
- * and consumer.
+ * Concurrency (code unchanged from upstream): the buffer is lock-free
+ * for a SINGLE producer and a SINGLE consumer in separate contexts
+ * (two threads, or thread + ISR) -- the producer writes only `put`,
+ * the consumer writes only `get`, and the query inlines (is_empty,
+ * size_get, space_get) read one index from each side as aligned
+ * single-word loads, so they are tear-free from either side and return
+ * conservatively stale answers. No field is volatile and no memory
+ * barriers are issued, so:
+ *   - do NOT busy-wait on the query inlines: in a call-free loop the
+ *     compiler may legally hoist the index load and never observe the
+ *     other side's progress. Block on a k_sem/k_event signaled by the
+ *     other side instead;
+ *   - on SMP, the buffer alone does not order the data bytes against
+ *     the index publication: pair each handoff with a k_sem (or other
+ *     acquire/release primitive) and do not drain past the handoff
+ *     you were signaled for.
+ * Multiple producers OR multiple consumers must serialize access
+ * externally (e.g. a k_mutex or by locking interrupts).
  */
 
 #pragma once
@@ -99,6 +113,13 @@ static inline void ring_buf_internal_reset(struct ring_buf *buf, ring_buf_idx_t 
  * For use in a struct ring_buf initializer with a caller-provided data
  * area, e.g. `struct ring_buf rb = RING_BUF_INIT(buf, sizeof(buf));`.
  *
+ * @warning @a size8 must be <= RING_BUFFER_MAX_SIZE. Unlike
+ * @ref RING_BUF_DECLARE (BUILD_ASSERT) and @ref ring_buf_init
+ * (runtime __ASSERT), an initializer cannot check this; an oversized
+ * buffer compiles silently and corrupts data without error once
+ * cumulative traffic exceeds the index range (upstream has the same
+ * unchecked macro).
+ *
  * @param buf   Pointer to the data area (uint8_t[]).
  * @param size8 Size of the data area (in bytes).
  */
@@ -119,6 +140,11 @@ static inline void ring_buf_internal_reset(struct ring_buf *buf, ring_buf_idx_t 
  *
  * @code extern struct ring_buf <name>; @endcode
  *
+ * @note File-scope only: the macro expands to a BUILD_ASSERT plus two
+ * declarations, so it cannot be prefixed with `static`, and at block
+ * scope it would silently create a fresh automatic struct ring_buf per
+ * call over one shared function-static data array.
+ *
  * @param name  Name of the ring buffer.
  * @param size8 Size of ring buffer (in bytes).
  */
@@ -131,7 +157,7 @@ static inline void ring_buf_internal_reset(struct ring_buf *buf, ring_buf_idx_t 
  * @brief Initialize a ring buffer for byte data.
  *
  * This routine initializes a ring buffer, prior to its first use. It is only
- * used for the byte data, for which the size is expressed in bytes.
+ * used for ring buffers not defined using RING_BUF_DECLARE.
  *
  * @param buf  Address of ring buffer.
  * @param size Ring buffer size (in bytes).
@@ -195,11 +221,16 @@ static inline uint32_t ring_buf_capacity_get(const struct ring_buf *buf)
 }
 
 /**
- * @brief Determine used space in a ring buffer.
+ * @brief Determine size of available data in a ring buffer.
+ *
+ * Counts committed-and-unread bytes only: bytes inside an outstanding
+ * (unfinished) claim are counted neither here nor by
+ * @ref ring_buf_space_get. (Wording from current upstream main; the
+ * v3.7-era "used space" phrasing was misleading around claims.)
  *
  * @param buf Address of ring buffer.
  *
- * @return Ring buffer space used (in bytes).
+ * @return Ring buffer data size (in bytes).
  */
 static inline uint32_t ring_buf_size_get(const struct ring_buf *buf)
 {
@@ -220,9 +251,10 @@ static inline uint32_t ring_buf_size_get(const struct ring_buf *buf)
  * concurrent write operations, either by preventing all writers from
  * being preempted or by using a mutex to govern writes to the ring buffer.
  *
- * @warning
- * Ring buffer instance should not mix byte access and item access
- * (calls prefixed with ring_buf_item_).
+ * @note An outstanding claim must be completed with
+ * @ref ring_buf_put_finish before any other put-side call (including
+ * copy-mode @ref ring_buf_put): finishing rewinds the allocation head to
+ * the committed tail, silently discarding whatever was still claimed.
  *
  * @param buf  Address of ring buffer.
  * @param data Pointer to the address. It is set to a location within
@@ -251,15 +283,14 @@ static inline uint32_t ring_buf_put_claim(struct ring_buf *buf, uint8_t **data, 
  * concurrent write operations, either by preventing all writers from
  * being preempted or by using a mutex to govern writes to the ring buffer.
  *
- * @warning
- * Ring buffer instance should not mix byte access and item access
- * (calls prefixed with ring_buf_item_).
- *
  * @param buf  Address of ring buffer.
  * @param size Number of valid bytes in the allocated buffers.
  *
  * @retval 0 Successful operation.
- * @retval -EINVAL Provided @a size exceeds free space in the ring buffer.
+ * @retval -EINVAL Provided @a size exceeds the bytes claimed by preceding
+ *	   @ref ring_buf_put_claim invocations and not yet finished.
+ *	   (Upstream documents "exceeds free space", but the code -- here
+ *	   and upstream -- checks the outstanding claimed amount.)
  */
 static inline int ring_buf_put_finish(struct ring_buf *buf, uint32_t size)
 {
@@ -276,15 +307,11 @@ static inline int ring_buf_put_finish(struct ring_buf *buf, uint32_t size)
  * concurrent write operations, either by preventing all writers from
  * being preempted or by using a mutex to govern writes to the ring buffer.
  *
- * @warning
- * Ring buffer instance should not mix byte access and item access
- * (calls prefixed with ring_buf_item_).
- *
  * @param buf  Address of ring buffer.
  * @param data Address of data.
  * @param size Data size (in bytes).
  *
- * @retval Number of bytes written.
+ * @return Number of bytes written.
  */
 uint32_t ring_buf_put(struct ring_buf *buf, const uint8_t *data, uint32_t size);
 
@@ -300,9 +327,11 @@ uint32_t ring_buf_put(struct ring_buf *buf, const uint8_t *data, uint32_t size);
  * concurrent read operations, either by preventing all readers from being
  * preempted or by using a mutex to govern reads to the ring buffer.
  *
- * @warning
- * Ring buffer instance should not mix byte access and item access
- * (calls prefixed with ring_buf_item_).
+ * @note An outstanding claim must be completed with
+ * @ref ring_buf_get_finish before any other get-side call (including
+ * copy-mode @ref ring_buf_get and @ref ring_buf_peek): finishing rewinds
+ * the claim head to the freed tail, silently discarding whatever was
+ * still claimed.
  *
  * @param buf  Address of ring buffer.
  * @param data Pointer to the address. It is set to a location within
@@ -331,15 +360,14 @@ static inline uint32_t ring_buf_get_claim(struct ring_buf *buf, uint8_t **data, 
  * concurrent read operations, either by preventing all readers from being
  * preempted or by using a mutex to govern reads to the ring buffer.
  *
- * @warning
- * Ring buffer instance should not mix byte access and item access
- * (calls prefixed with ring_buf_item_).
- *
  * @param buf  Address of ring buffer.
  * @param size Number of bytes that can be freed.
  *
  * @retval 0 Successful operation.
- * @retval -EINVAL Provided @a size exceeds valid bytes in the ring buffer.
+ * @retval -EINVAL Provided @a size exceeds the bytes claimed by preceding
+ *	   @ref ring_buf_get_claim invocations and not yet finished.
+ *	   (Upstream documents "exceeds valid bytes", but the code -- here
+ *	   and upstream -- checks the outstanding claimed amount.)
  */
 static inline int ring_buf_get_finish(struct ring_buf *buf, uint32_t size)
 {
@@ -356,15 +384,11 @@ static inline int ring_buf_get_finish(struct ring_buf *buf, uint32_t size)
  * concurrent read operations, either by preventing all readers from being
  * preempted or by using a mutex to govern reads to the ring buffer.
  *
- * @warning
- * Ring buffer instance should not mix byte access and item access
- * (calls prefixed with ring_buf_item_).
- *
  * @param buf  Address of ring buffer.
  * @param data Address of the output buffer. Can be NULL to discard data.
  * @param size Data size (in bytes).
  *
- * @retval Number of bytes written to the output buffer.
+ * @return Number of bytes written to the output buffer.
  */
 uint32_t ring_buf_get(struct ring_buf *buf, uint8_t *data, uint32_t size);
 
@@ -380,19 +404,21 @@ uint32_t ring_buf_get(struct ring_buf *buf, uint8_t *data, uint32_t size);
  * preempted or by using a mutex to govern reads to the ring buffer.
  *
  * @warning
- * Ring buffer instance should not mix byte access and item access
- * (calls prefixed with ring_buf_item_).
- *
- * @warning
  * Multiple calls to peek will result in the same data being 'peeked' multiple
  * times. To remove data, use either @ref ring_buf_get or @ref
- * ring_buf_get_claim followed by @ref ring_buf_get_finish.
+ * ring_buf_get_claim followed by @ref ring_buf_get_finish with a non-zero
+ * `size`.
+ *
+ * @note Internally peek claims and then unclaims (finishes with size 0),
+ * which rewinds the get-side claim head -- so it must not be called while
+ * a @ref ring_buf_get_claim is outstanding (the claim would be silently
+ * voided and peek would return bytes past it).
  *
  * @param buf  Address of ring buffer.
  * @param data Address of the output buffer. Cannot be NULL.
  * @param size Data size (in bytes).
  *
- * @retval Number of bytes written to the output buffer.
+ * @return Number of bytes written to the output buffer.
  */
 uint32_t ring_buf_peek(struct ring_buf *buf, uint8_t *data, uint32_t size);
 
