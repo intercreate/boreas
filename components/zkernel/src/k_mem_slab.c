@@ -89,10 +89,12 @@ int k_mem_slab_init(struct k_mem_slab *slab, void *buffer, size_t block_size, ui
 	return 0;
 }
 
-/* Lazy init for K_MEM_SLAB_DEFINE'd slabs: thread the free list and
- * initialize the embedded sem on first use, once, under the lock. The
- * struct's lock is statically initialized by the DEFINE macro. */
-static int K_ISR_SAFE z_mem_slab_ensure_init(struct k_mem_slab *slab)
+/* Thread the free list of a K_MEM_SLAB_DEFINE'd slab on first use, once,
+ * under the slab's (statically-initialized) lock. The embedded sem is
+ * already compile-time-initialized, so nothing here calls k_sem_init --
+ * this is pure pointer work and therefore IRAM/ISR-safe. A slab created
+ * via k_mem_slab_init() has threaded == true already and skips this. */
+static int K_ISR_SAFE z_mem_slab_ensure_threaded(struct k_mem_slab *slab)
 {
 	if (__atomic_load_n(&slab->threaded, __ATOMIC_ACQUIRE)) {
 		return 0;
@@ -101,10 +103,9 @@ static int K_ISR_SAFE z_mem_slab_ensure_init(struct k_mem_slab *slab)
 	int ret = 0;
 
 	z_kernel_lock(&slab->lock);
-	if (!slab->threaded) {
+	if (!__atomic_load_n(&slab->threaded, __ATOMIC_ACQUIRE)) {
 		ret = z_mem_slab_create_free_list(slab);
 		if (ret == 0) {
-			(void)k_sem_init(&slab->avail, slab->num_blocks, slab->num_blocks);
 			__atomic_store_n(&slab->threaded, true, __ATOMIC_RELEASE);
 		}
 	}
@@ -114,7 +115,7 @@ static int K_ISR_SAFE z_mem_slab_ensure_init(struct k_mem_slab *slab)
 
 int K_ISR_SAFE k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeout_t timeout)
 {
-	int ret = z_mem_slab_ensure_init(slab);
+	int ret = z_mem_slab_ensure_threaded(slab);
 
 	if (ret != 0) {
 		*mem = NULL;
@@ -147,9 +148,17 @@ int K_ISR_SAFE k_mem_slab_alloc(struct k_mem_slab *slab, void **mem, k_timeout_t
 
 void K_ISR_SAFE k_mem_slab_free(struct k_mem_slab *slab, void *mem)
 {
+	/* Defensive: a correctly-used slab is always threaded by the time a
+	 * caller holds a block to free, but a DEFINE'd slab freed before any
+	 * alloc (caller error) would otherwise push onto an unthreaded list. */
+	(void)z_mem_slab_ensure_threaded(slab);
+
 	z_kernel_lock(&slab->lock);
 	*(char **)mem = slab->free_list;
 	slab->free_list = (char *)mem;
+	/* num_used is re-incremented by the woken allocator in the hand-off
+	 * case, so it nets unchanged; the brief dip is a relaxed-stats
+	 * window only (the sem count, not num_used, gates allocation). */
 	slab->num_used--;
 	z_kernel_unlock(&slab->lock);
 

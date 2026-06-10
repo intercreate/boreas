@@ -160,9 +160,16 @@ static void test_mem_slab_define_usable(void)
 	/* Empty now. */
 	TEST_ASSERT_EQUAL(-ENOMEM, k_mem_slab_alloc(&declared_slab, &d, K_NO_WAIT));
 
+	/* Scribble a sentinel, free, re-alloc: upstream returns the block
+	 * uninitialized (never zeroed), so the bytes must survive. (The
+	 * free path overwrites only the first word with the list link.) */
+	memset((uint8_t *)b + sizeof(void *), 0x5A, 16 - sizeof(void *));
 	k_mem_slab_free(&declared_slab, b);
 	TEST_ASSERT_EQUAL(0, k_mem_slab_alloc(&declared_slab, &d, K_NO_WAIT));
 	TEST_ASSERT_EQUAL(b, d); /* the just-freed block came back */
+	for (size_t i = sizeof(void *); i < 16; i++) {
+		TEST_ASSERT_EQUAL_UINT8(0x5A, ((uint8_t *)d)[i]); /* not zeroed */
+	}
 
 	k_mem_slab_free(&declared_slab, a);
 	k_mem_slab_free(&declared_slab, c);

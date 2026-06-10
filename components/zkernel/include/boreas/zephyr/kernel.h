@@ -333,6 +333,11 @@ struct k_mem_slab {
  * test host) without the caller minding the word size. */
 #define Z_MEM_SLAB_WB_UP(x) ROUND_UP((x), sizeof(void *))
 
+/* The embedded sem is compile-time-initialized (count = num_blocks),
+ * exactly like K_SEM_DEFINE / K_TIMER_DEFINE's embedded sem -- so the
+ * only thing left to do lazily on first use is thread the free list
+ * (pure pointer work, IRAM-safe). k_sem_init never runs on a hot or ISR
+ * path for a DEFINE'd slab. */
 #define Z_MEM_SLAB_INITIALIZER(name, _block_size, _num_blocks)                                     \
 	{                                                                                          \
 		.buffer = _k_mem_slab_buf_##name,                                                  \
@@ -341,11 +346,13 @@ struct k_mem_slab {
 		.num_blocks = (_num_blocks),                                                       \
 		.num_used = 0,                                                                     \
 		.max_used = 0,                                                                     \
+		.avail = Z_SEM_INITIALIZER(name.avail, _num_blocks, _num_blocks),                  \
 		.lock = portMUX_INITIALIZER_UNLOCKED,                                              \
 		.threaded = false,                                                                 \
 	}
 
 #define Z_MEM_SLAB_BUF_DEFINE(name, _block_size, _num_blocks, _align)                              \
+	BUILD_ASSERT((_num_blocks) >= 1, "num_blocks must be >= 1");                               \
 	BUILD_ASSERT(((_align) & ((_align) - 1)) == 0, "align must be a power of 2");              \
 	BUILD_ASSERT(((_block_size) % (_align)) == 0, "block_size must be a multiple of align");   \
 	static uint8_t __attribute__((aligned(Z_MEM_SLAB_WB_UP(                                    \
@@ -354,17 +361,15 @@ struct k_mem_slab {
 /**
  * Statically define and initialize a memory slab. Usable without an
  * explicit k_mem_slab_init() -- the free list is threaded on first
- * alloc/free. @p _block_size and the buffer alignment are rounded up to
- * a pointer-word boundary (upstream WB_UP), so the stored block size may
- * exceed @p _block_size.
- *
- * @note First use of a DEFINE'd slab should be from thread context (the
- *       one-time lazy init is not guaranteed IRAM-safe); for slabs first
- *       touched from an ISR, call k_mem_slab_init() at startup instead.
+ * alloc/free (the embedded sem is initialized at compile time, so this
+ * lazy step is just IRAM-safe pointer work and is safe from any
+ * context, including an ISR). @p _block_size and the buffer alignment
+ * are rounded up to a pointer-word boundary (upstream WB_UP), so the
+ * stored block size may exceed @p _block_size.
  *
  * @param name        Name of the slab.
  * @param _block_size Size of each block in bytes (multiple of @p _align).
- * @param _num_blocks Number of blocks.
+ * @param _num_blocks Number of blocks (>= 1).
  * @param _align      Block/buffer alignment (power of 2).
  */
 #define K_MEM_SLAB_DEFINE(name, _block_size, _num_blocks, _align)                                  \
