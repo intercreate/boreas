@@ -54,11 +54,9 @@ static void test_ring_buf_put_saturates_at_capacity(void)
 {
 	uint8_t storage[8];
 	struct ring_buf rb;
-	uint8_t in[12];
+	/* contents never inspected -- this test asserts only counts */
+	uint8_t in[12] = {0};
 
-	for (int i = 0; i < (int)sizeof(in); i++) {
-		in[i] = (uint8_t)i;
-	}
 	ring_buf_init(&rb, sizeof(storage), storage);
 
 	/* Only capacity bytes fit; the rest is refused. */
@@ -256,6 +254,13 @@ static void test_ring_buf_put_claim_wraps(void)
 	}
 	TEST_ASSERT_EQUAL(0, ring_buf_put_finish(&rb, first + second));
 	TEST_ASSERT_EQUAL(8, ring_buf_size_get(&rb));
+
+	/* Drain and verify the two claims landed at the correct physical
+	 * offsets (end segment first, then the wrapped start). */
+	const uint8_t expect[8] = {0xAA, 0xBB, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5};
+	uint8_t out[8] = {0};
+	TEST_ASSERT_EQUAL(8, ring_buf_get(&rb, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT8_ARRAY(expect, out, sizeof(expect));
 }
 
 /* ring_buf_put/get themselves loop over the wrap, so a single call that
@@ -270,9 +275,9 @@ static void test_ring_buf_put_get_across_wrap(void)
 
 	ring_buf_init(&rb, sizeof(storage), storage);
 
-	/* Push the offset forward by 5, drain it. */
+	/* Push the offset forward by 5, discard it. */
 	ring_buf_put(&rb, a, sizeof(a));
-	ring_buf_get(&rb, out, sizeof(a));
+	TEST_ASSERT_EQUAL(5, ring_buf_get(&rb, NULL, sizeof(a)));
 
 	/* This 6-byte write starts at offset 5 and wraps the 8-byte buffer. */
 	TEST_ASSERT_EQUAL(6, ring_buf_put(&rb, b, sizeof(b)));
@@ -281,7 +286,6 @@ static void test_ring_buf_put_get_across_wrap(void)
 	TEST_ASSERT_EQUAL(6, ring_buf_size_get(&rb));
 	TEST_ASSERT_EQUAL(2, ring_buf_space_get(&rb));
 
-	memset(out, 0, sizeof(out));
 	TEST_ASSERT_EQUAL(6, ring_buf_get(&rb, out, sizeof(b)));
 	TEST_ASSERT_EQUAL_UINT8_ARRAY(b, out, sizeof(b));
 	/* Fully drained after the wrap. */
@@ -296,12 +300,13 @@ static void test_ring_buf_many_wrap_cycles(void)
 	uint8_t storage[7]; /* non-power-of-two on purpose */
 	struct ring_buf rb;
 	uint8_t next_write = 0;
-	uint8_t next_read = 0;
 
 	ring_buf_init(&rb, sizeof(storage), storage);
 
-	/* Far more bytes than fit in ring_buf_idx_t at a time, streamed in
-	 * 5-byte chunks through a 7-byte buffer so the offset wraps often. */
+	/* 100000 bytes streamed in 5-byte chunks through a 7-byte buffer so
+	 * the physical offset wraps constantly and the default uint16_t
+	 * indices cross their 65536 range ~1.5 times (the seeded test below
+	 * covers the index wrap under CONFIG_RING_BUFFER_LARGE). */
 	for (int cycle = 0; cycle < 20000; cycle++) {
 		uint8_t chunk[5];
 
@@ -310,26 +315,27 @@ static void test_ring_buf_many_wrap_cycles(void)
 		}
 		TEST_ASSERT_EQUAL(5, ring_buf_put(&rb, chunk, sizeof(chunk)));
 
+		/* drained fully each cycle, so the chunk is the expectation */
 		uint8_t out[5] = {0};
 		TEST_ASSERT_EQUAL(5, ring_buf_get(&rb, out, sizeof(out)));
-		for (int i = 0; i < 5; i++) {
-			TEST_ASSERT_EQUAL_UINT8(next_read++, out[i]);
-		}
+		TEST_ASSERT_EQUAL_UINT8_ARRAY(chunk, out, sizeof(out));
 	}
 	TEST_ASSERT_TRUE(ring_buf_is_empty(&rb));
 }
 
 /* Fill-to-full / drain-to-empty repeatedly, enough cycles to carry the
- * uint16_t indices across their 65536 wrap, asserting the full and
- * empty discriminations AT high `allocated` each cycle. The
+ * default uint16_t indices across their 65536 wrap, asserting the full
+ * and empty discriminations AT high `allocated` each cycle. The
  * many-wrap-cycles test above drains within a 7-byte span so allocated
  * never approaches capacity; this one holds the buffer completely full
  * across the index wrap, exercising space_get == 0 / put returning 0
  * (full) vs is_empty (empty) right where the modular subtraction must
- * stay unambiguous. */
+ * stay unambiguous. (Traffic volume cannot reach the 2^32 wrap under
+ * CONFIG_RING_BUFFER_LARGE -- the seeded test below covers that.) */
 static void test_ring_buf_full_empty_across_wrap(void)
 {
 	static uint8_t storage[4096];
+	static uint8_t expected[sizeof(storage)]; /* per-cycle ramp, off-stack */
 	struct ring_buf rb;
 	uint8_t *dst;
 
@@ -340,14 +346,16 @@ static void test_ring_buf_full_empty_across_wrap(void)
 	for (int cycle = 0; cycle < 40; cycle++) {
 		uint8_t seed = (uint8_t)cycle;
 
+		for (uint32_t i = 0; i < sizeof(storage); i++) {
+			expected[i] = (uint8_t)(seed + i);
+		}
+
 		/* Fill to exactly full via the claim path. */
 		uint32_t total = 0;
 		while (total < sizeof(storage)) {
 			uint32_t n = ring_buf_put_claim(&rb, &dst, sizeof(storage) - total);
 			TEST_ASSERT_NOT_EQUAL(0, n);
-			for (uint32_t i = 0; i < n; i++) {
-				dst[i] = (uint8_t)(seed + total + i);
-			}
+			memcpy(dst, &expected[total], n);
 			total += n;
 			TEST_ASSERT_EQUAL(0, ring_buf_put_finish(&rb, n));
 		}
@@ -364,9 +372,7 @@ static void test_ring_buf_full_empty_across_wrap(void)
 			uint8_t *src;
 			uint32_t n = ring_buf_get_claim(&rb, &src, sizeof(storage) - got);
 			TEST_ASSERT_NOT_EQUAL(0, n);
-			for (uint32_t i = 0; i < n; i++) {
-				TEST_ASSERT_EQUAL_UINT8((uint8_t)(seed + got + i), src[i]);
-			}
+			TEST_ASSERT_EQUAL_UINT8_ARRAY(&expected[got], src, n);
 			got += n;
 			TEST_ASSERT_EQUAL(0, ring_buf_get_finish(&rb, n));
 		}
@@ -376,6 +382,83 @@ static void test_ring_buf_full_empty_across_wrap(void)
 		TEST_ASSERT_EQUAL(0, ring_buf_size_get(&rb));
 		TEST_ASSERT_EQUAL(sizeof(storage), ring_buf_space_get(&rb));
 	}
+}
+
+/* The full/empty discrimination must also hold while head/tail/base
+ * cross the numeric wrap of ring_buf_idx_t itself, whatever its width.
+ * Traffic volume can only reach the default uint16_t wrap, so this test
+ * seeds the indices just below the wrap via ring_buf_internal_reset
+ * (whose doc blesses non-zero values for validation testing -- the same
+ * technique upstream's ringbuffer test suite uses), making the coverage
+ * independent of CONFIG_RING_BUFFER_LARGE. */
+static void test_ring_buf_index_wrap_seeded(void)
+{
+	uint8_t storage[64];
+	struct ring_buf rb;
+	uint8_t chunk[64];
+	uint8_t out[64];
+
+	ring_buf_init(&rb, sizeof(storage), storage);
+	/* Two full buffer-loads below the wrap: the indices land exactly on
+	 * 0 at the end of cycle 2, so cycles 3-4 exercise post-wrap state. */
+	ring_buf_internal_reset(&rb, (ring_buf_idx_t)(0U - 2U * sizeof(storage)));
+
+	for (int cycle = 0; cycle < 4; cycle++) {
+		for (uint32_t i = 0; i < sizeof(chunk); i++) {
+			chunk[i] = (uint8_t)(cycle + i);
+		}
+		TEST_ASSERT_EQUAL(sizeof(storage), ring_buf_put(&rb, chunk, sizeof(chunk)));
+
+		/* Full at (and across) the index wrap. */
+		TEST_ASSERT_EQUAL(0, ring_buf_space_get(&rb));
+		TEST_ASSERT_FALSE(ring_buf_is_empty(&rb));
+		TEST_ASSERT_EQUAL(0, ring_buf_put(&rb, chunk, 1));
+
+		memset(out, 0, sizeof(out));
+		TEST_ASSERT_EQUAL(sizeof(storage), ring_buf_get(&rb, out, sizeof(out)));
+		TEST_ASSERT_EQUAL_UINT8_ARRAY(chunk, out, sizeof(chunk));
+
+		/* Empty at (and across) the index wrap. */
+		TEST_ASSERT_TRUE(ring_buf_is_empty(&rb));
+		TEST_ASSERT_EQUAL(sizeof(storage), ring_buf_space_get(&rb));
+	}
+}
+
+/* peek must walk both physical segments of wrapped data (two internal
+ * claim iterations) and then rewind the claim head back across the
+ * physical end via its internal get_finish(0); the get side must
+ * likewise allow several claims before one finish covering all of
+ * them. Neither path is reachable through the contiguous tests above. */
+static void test_ring_buf_peek_across_wrap_multi_claim_get(void)
+{
+	uint8_t storage[8];
+	struct ring_buf rb;
+	const uint8_t fill[] = {1, 2, 3, 4, 5, 6};
+	const uint8_t wrapped[] = {0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5};
+	uint8_t out[8] = {0};
+	uint8_t *src;
+
+	ring_buf_init(&rb, sizeof(storage), storage);
+
+	/* Park the offset at 6 so the next 6 bytes span the physical end. */
+	ring_buf_put(&rb, fill, sizeof(fill));
+	TEST_ASSERT_EQUAL(6, ring_buf_get(&rb, NULL, sizeof(fill)));
+	TEST_ASSERT_EQUAL(6, ring_buf_put(&rb, wrapped, sizeof(wrapped)));
+
+	/* peek the wrapped data: both segments, in order, not consumed. */
+	TEST_ASSERT_EQUAL(6, ring_buf_peek(&rb, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT8_ARRAY(wrapped, out, sizeof(wrapped));
+	TEST_ASSERT_EQUAL(6, ring_buf_size_get(&rb));
+
+	/* Drain with two claims (split by the physical end) and a single
+	 * finish covering both. */
+	TEST_ASSERT_EQUAL(2, ring_buf_get_claim(&rb, &src, 8));
+	TEST_ASSERT_EQUAL_UINT8_ARRAY(&wrapped[0], src, 2);
+	TEST_ASSERT_EQUAL(4, ring_buf_get_claim(&rb, &src, 8));
+	TEST_ASSERT_EQUAL_UINT8_ARRAY(&wrapped[2], src, 4);
+	TEST_ASSERT_EQUAL(0, ring_buf_get_finish(&rb, 6));
+	TEST_ASSERT_TRUE(ring_buf_is_empty(&rb));
+	TEST_ASSERT_EQUAL(8, ring_buf_space_get(&rb));
 }
 
 /* ----------------------------------------------------------------
@@ -414,5 +497,7 @@ void test_ring_buf_group(void)
 	RUN_TEST(test_ring_buf_put_get_across_wrap);
 	RUN_TEST(test_ring_buf_many_wrap_cycles);
 	RUN_TEST(test_ring_buf_full_empty_across_wrap);
+	RUN_TEST(test_ring_buf_index_wrap_seeded);
+	RUN_TEST(test_ring_buf_peek_across_wrap_multi_claim_get);
 	RUN_TEST(test_ring_buf_declare_usable);
 }
