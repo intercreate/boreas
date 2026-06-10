@@ -13,6 +13,12 @@
 
 #include "esp_attr.h"
 
+/* Compatibility re-exports: upstream code reaches these symbols through
+ * <zephyr/toolchain.h> and <zephyr/sys/__assert.h>, but historical
+ * Boreas ports include only this header -- keep both paths working. */
+#include "zephyr/sys/__assert.h"
+#include "zephyr/toolchain.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -95,62 +101,6 @@ extern "C" {
 /* Aligned attribute */
 #ifndef ALIGNED
 #define ALIGNED(x) __attribute__((__aligned__(x)))
-#endif
-
-/* Weak symbol */
-#ifndef __weak
-#define __weak __attribute__((__weak__))
-#endif
-
-/* Always inline — undef any prior definition to guarantee `inline` is present
- * (RISC-V GCC errors without it under -Werror=attributes). */
-#undef ALWAYS_INLINE
-#define ALWAYS_INLINE __attribute__((always_inline)) inline
-
-/* Runtime assertion -- logs and aborts.
- * NOT safe from IRAM ISR context (ESP_LOGE + abort are flash-resident).
- * Use k_panic() for unrecoverable errors in ISR/IRAM context. */
-#ifndef __ASSERT
-#include <stdlib.h> /* abort() */
-
-#include "esp_log.h"
-#define __ASSERT(cond, msg)                                                                        \
-	do {                                                                                       \
-		if (!(cond)) {                                                                     \
-			ESP_LOGE("ASSERT", "%s at %s:%d", (msg), __FILE__, __LINE__);              \
-			abort();                                                                   \
-		}                                                                                  \
-	} while (0)
-#endif
-
-/* Assertion with no message (upstream spelling). */
-#ifndef __ASSERT_NO_MSG
-#define __ASSERT_NO_MSG(cond) __ASSERT((cond), "")
-#endif
-
-/* Branch-prediction hints (upstream toolchain.h). */
-#ifndef likely
-#define likely(x) __builtin_expect(!!(x), 1)
-#endif
-#ifndef unlikely
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#endif
-
-/* Upstream places __noinit data in a section the loader does not zero,
- * to save startup cost. Boreas maps it to ordinary zero-initialized BSS
- * rather than ESP-IDF's __NOINIT_ATTR (which is a `.noinit` section
- * attribute): for the only user, ring_buf, a RING_BUF_DECLARE'd buffer
- * has its indices zero-initialized by the struct's static initializer
- * and never reads buffer bytes it has not written, so no-init vs
- * zero-init is behaviorally invisible. Plain BSS also keeps the shim
- * free of a section attribute (which does not port cleanly to the
- * Mach-O host toolchain used for the linux test target).
- *
- * Known limitation: genuine no-init semantics are NOT provided -- code
- * that needs data left uninitialized (or retained across a warm reset)
- * must use ESP-IDF's __NOINIT_ATTR / RTC_NOINIT_ATTR directly. */
-#ifndef __noinit
-#define __noinit
 #endif
 
 /* IRAM-safe panic -- triggers an illegal-instruction exception caught by
