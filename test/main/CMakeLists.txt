@@ -5,6 +5,7 @@ set(test_srcs
     "test_dlist.c"
     "test_byteorder.c"
     "test_atomic.c"
+    "test_ring_buf.c"
     "test_k_sem.c"
     "test_k_mutex.c"
     "test_k_msgq.c"
