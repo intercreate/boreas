@@ -1,13 +1,23 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
- * Copyright 2026 Intercreate
+ * Copyright (c) 2011-2014 Wind River Systems, Inc.   (upstream Zephyr)
+ * Copyright 2026 Intercreate                         (Boreas)
  *
- * Zephyr-compatible utility macros.
+ * Zephyr-compatible utility macros. Most macros here are universal C
+ * idioms (independently written), but the IS_ENABLED machinery (the
+ * _XXXX##/_YYYY token-paste trick) is taken verbatim from upstream
+ * Zephyr, hence the retained upstream copyright.
  */
 
 #pragma once
 
 #include "esp_attr.h"
+
+/* Compatibility re-exports: upstream code reaches these symbols through
+ * <zephyr/toolchain.h> and <zephyr/sys/__assert.h>, but historical
+ * Boreas ports include only this header -- keep both paths working. */
+#include "zephyr/sys/__assert.h"
+#include "zephyr/toolchain.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,30 +101,6 @@ extern "C" {
 /* Aligned attribute */
 #ifndef ALIGNED
 #define ALIGNED(x) __attribute__((__aligned__(x)))
-#endif
-
-/* Weak symbol */
-#ifndef __weak
-#define __weak __attribute__((__weak__))
-#endif
-
-/* Always inline — undef any prior definition to guarantee `inline` is present
- * (RISC-V GCC errors without it under -Werror=attributes). */
-#undef ALWAYS_INLINE
-#define ALWAYS_INLINE __attribute__((always_inline)) inline
-
-/* Runtime assertion -- logs and aborts.
- * NOT safe from IRAM ISR context (ESP_LOGE + abort are flash-resident).
- * Use k_panic() for unrecoverable errors in ISR/IRAM context. */
-#ifndef __ASSERT
-#include "esp_log.h"
-#define __ASSERT(cond, msg)                                                                        \
-	do {                                                                                       \
-		if (!(cond)) {                                                                     \
-			ESP_LOGE("ASSERT", "%s at %s:%d", (msg), __FILE__, __LINE__);              \
-			abort();                                                                   \
-		}                                                                                  \
-	} while (0)
 #endif
 
 /* IRAM-safe panic -- triggers an illegal-instruction exception caught by
