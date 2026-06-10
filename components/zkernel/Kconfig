@@ -6,8 +6,10 @@ menu "Boreas Kernel (zkernel)"
         help
             Widens the ring buffer index type from uint16_t to uint32_t,
             raising the maximum ring_buf capacity from 32767 bytes to
-            ~2 GiB at the cost of 6 extra bytes per struct ring_buf.
-            Mirrors upstream Zephyr's CONFIG_RING_BUFFER_LARGE.
+            ~2 GiB at the cost of 12 extra bytes per struct ring_buf
+            (six index fields widen by 2 bytes each; 20 -> 32 bytes on
+            the 32-bit target). Mirrors upstream Zephyr's
+            CONFIG_RING_BUFFER_LARGE.
 
     config ZKERNEL_MUTEX_DEBUG
         bool "Enable mutex lock-ordering assertions"
