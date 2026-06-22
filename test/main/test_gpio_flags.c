@@ -230,6 +230,23 @@ static void test_gpio_set_dt_no_invert_active_high(void)
 	TEST_ASSERT_EQUAL(0, last_set_raw_value);
 }
 
+static void test_gpio_active_high_is_named_zero(void)
+{
+	/* GPIO_ACTIVE_HIGH is the named absence of the active-low bit, so a spec
+	 * declared with it must behave identically to dt_flags == 0. */
+	TEST_ASSERT_EQUAL(0, GPIO_ACTIVE_HIGH);
+
+	reset_mock();
+	const struct gpio_dt_spec spec = {
+		.port = &mock_gpio, .pin = 4, .dt_flags = GPIO_ACTIVE_HIGH};
+
+	gpio_pin_set_dt(&spec, 1);
+	TEST_ASSERT_EQUAL(1, last_set_raw_value);
+
+	gpio_pin_set_dt(&spec, 0);
+	TEST_ASSERT_EQUAL(0, last_set_raw_value);
+}
+
 static void test_gpio_get_dt_inverts_for_active_low(void)
 {
 	reset_mock();
@@ -257,5 +274,6 @@ void test_gpio_flags_group(void)
 	RUN_TEST(test_gpio_active_low_stripped_from_driver_flags);
 	RUN_TEST(test_gpio_set_dt_inverts_for_active_low);
 	RUN_TEST(test_gpio_set_dt_no_invert_active_high);
+	RUN_TEST(test_gpio_active_high_is_named_zero);
 	RUN_TEST(test_gpio_get_dt_inverts_for_active_low);
 }
