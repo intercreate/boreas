@@ -16,6 +16,9 @@
 /* Bits 0-7: dt_flags — board-level properties (uint8_t in gpio_dt_spec).
  * Bit positions match upstream Zephyr dt-bindings/gpio/gpio.h. */
 #define GPIO_ACTIVE_LOW  BIT(0)
+/* Named zero: active-high is the absence of the active-low bit. Mirrors
+ * upstream's GPIO_ACTIVE_HIGH so boards/devicetree can state intent explicitly. */
+#define GPIO_ACTIVE_HIGH (0 << 0)
 #define GPIO_OPEN_DRAIN  BIT(1) /* reserved */
 #define GPIO_OPEN_SOURCE BIT(2) /* reserved */
 #define GPIO_PULL_UP     BIT(4)
