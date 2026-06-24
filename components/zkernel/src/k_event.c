@@ -29,7 +29,13 @@ struct z_event_waiter {
 	bool woken;       /* a post/set targeted this waiter */
 };
 
-static uint32_t z_event_match(uint32_t current, uint32_t mask, bool all)
+/* K_ISR_SAFE (IRAM): called on both ISR-safe paths -- the post family
+ * (z_event_post_internal) and the wait family's fast path
+ * (z_event_wait_internal). A flash-resident helper here would fault with
+ * a cache-access error when reached from an IRAM ISR during a concurrent
+ * flash op (the z_sem_pop_waiter class, issue #53). Pure arithmetic, no
+ * FreeRTOS calls -- safe in IRAM. */
+static uint32_t K_ISR_SAFE z_event_match(uint32_t current, uint32_t mask, bool all)
 {
 	uint32_t hit = current & mask;
 

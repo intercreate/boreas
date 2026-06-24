@@ -44,8 +44,14 @@ int k_sem_init(struct k_sem *sem, unsigned int initial_count, unsigned int limit
 
 /* Pop the wake target: highest cached priority, FIFO among equals
  * (upstream wakes the highest-priority waiter). Caller holds the lock.
- * Plain code over the caller-owned list -- no FreeRTOS calls. */
-static struct z_sem_waiter *z_sem_pop_waiter(struct k_sem *sem)
+ * Plain code over the caller-owned list -- no FreeRTOS calls.
+ *
+ * K_ISR_SAFE (IRAM): on k_sem_give's hot path, which is ISR-safe and may
+ * run while the flash cache is disabled. A flash-resident helper here
+ * would fault with a cache-access error when the give comes from an IRAM
+ * ISR during a concurrent flash op (issue #53). k_sem_reset is
+ * flash-resident, but flash code calling an IRAM helper is fine. */
+static K_ISR_SAFE struct z_sem_waiter *z_sem_pop_waiter(struct k_sem *sem)
 {
 	struct z_sem_waiter *best = NULL;
 	sys_dnode_t *n;
