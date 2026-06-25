@@ -1,9 +1,14 @@
 # Changelog
 
-Notable and breaking changes for downstream projects. Versions are not
-yet tagged; entries reference the merge PR.
+Notable and breaking changes for downstream projects. Entries reference
+the merge PR.
 
 ## Unreleased
+
+## 0.1.0 — 2026-07-01
+
+First tagged release. The 2026-06 hardening series is complete; the API
+surface below is the baseline downstream projects pin to.
 
 ### Migration checklist (bumping across the 2026-06 hardening series)
 
@@ -57,3 +62,9 @@ yet tagged; entries reference the merge PR.
 - The 2026-04 stack-local `k_sem` scheduler corruption was root-caused
   to the pre-#18 k_thread zombie defect and is fixed since #18; the
   trigger shapes are permanent regression tests (#39, issue #21).
+- **`k_sem_give` no longer cache-faults from an IRAM ISR** (#54, closes
+  #53): `z_sem_pop_waiter` and the other `K_ISR_SAFE` helpers are now
+  IRAM-resident (`.iram0.text`), so giving a semaphore or submitting work
+  from an `ESP_INTR_FLAG_IRAM` interrupt during a flash-cache-disabled
+  window no longer faults. A build-time guard
+  (`tools/check_iram_symbols.sh`) asserts the placement on the target ELF.
