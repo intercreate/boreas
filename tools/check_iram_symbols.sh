@@ -13,31 +13,39 @@
 # ELF. Section names (.iram0.text vs .flash.text/.text) are consistent
 # across Xtensa and RISC-V targets, so the check is ISA-agnostic.
 #
-# Usage: tools/check_iram_symbols.sh <firmware.elf>
-#   OBJDUMP=<triple>-objdump may be set to override toolchain autodetect.
+# The symbol set is DERIVED from source: every function carrying the
+# K_ISR_SAFE attribute in components/*/src/*.c must be IRAM-resident, so a
+# newly-added ISR-safe helper is covered automatically with no edit here.
+# A symbol the compiler inlined into its IRAM caller has no out-of-line
+# symbol and is reported as "skip" (safe). Override the derived set with
+# IRAM_SYMBOLS="a b c" if you ever need to.
+#
+# Usage: tools/check_iram_symbols.sh <firmware.elf> [src-root]
+#   OBJDUMP=<triple>-objdump   override toolchain autodetect
+#   IRAM_SYMBOLS="sym1 sym2"   override the derived symbol set
 
 set -euo pipefail
 
-ELF="${1:?usage: check_iram_symbols.sh <firmware.elf>}"
+ELF="${1:?usage: check_iram_symbols.sh <firmware.elf> [src-root]}"
+SRC_ROOT="${2:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-# Symbols that MUST be IRAM-resident: each carries K_ISR_SAFE and sits on
-# a call path reachable from an IRAM ISR while the flash cache may be off.
-# Keep in sync with the K_ISR_SAFE definitions in components/*/src.
-REQUIRED_IRAM=(
-	# k_sem.c
-	z_sem_pop_waiter
-	k_sem_give
-	k_sem_take
-	# k_event.c
-	z_event_match
-	z_event_post_internal
-	z_event_wait_internal
-	# k_work.c
-	k_work_submit_internal
-	k_work_submit_to_queue
-	# k_msgq.c
-	k_msgq_put
-)
+# Derive the K_ISR_SAFE function set from source. A definition line
+# carries the attribute and opens a parameter list; the function name is
+# the identifier just before '('. Drop comment lines and the macro
+# #define (the only other places the token appears).
+derive_symbols() {
+	grep -hE 'K_ISR_SAFE' "$SRC_ROOT"/components/*/src/*.c |
+		grep -vE '^[[:space:]]*([*]|/[*]|//|#)' |
+		grep -E '\(' |
+		sed -E 's/.*[^A-Za-z0-9_]([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\(.*/\1/' |
+		sort -u
+}
+
+SYMBOLS="${IRAM_SYMBOLS:-$(derive_symbols)}"
+if [ -z "${SYMBOLS//[[:space:]]/}" ]; then
+	echo "error: no K_ISR_SAFE symbols found under $SRC_ROOT/components" >&2
+	exit 2
+fi
 
 # Pick the toolchain objdump if not supplied.
 if [ -z "${OBJDUMP:-}" ]; then
@@ -59,7 +67,11 @@ command -v "$OBJDUMP" >/dev/null || {
 SYMTAB="$("$OBJDUMP" -t "$ELF")"
 
 fail=0
-for sym in "${REQUIRED_IRAM[@]}"; do
+checked=0
+while IFS= read -r sym; do
+	[ -n "$sym" ] || continue
+	checked=$((checked + 1))
+
 	# A symbol-table entry's line names exactly one section.
 	line="$(printf '%s\n' "$SYMTAB" | grep -E "[[:space:]]${sym}\$" || true)"
 
@@ -74,6 +86,8 @@ for sym in "${REQUIRED_IRAM[@]}"; do
 		echo "FAIL  $sym -> ${sec} (expected .iram0.text; flash-resident would cache-fault from an IRAM ISR)"
 		fail=1
 	fi
-done
+done <<<"$SYMBOLS"
 
+echo "---"
+echo "checked $checked K_ISR_SAFE symbol(s) in $(basename "$ELF")"
 exit "$fail"

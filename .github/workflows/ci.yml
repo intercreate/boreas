@@ -61,3 +61,15 @@ jobs:
           cd test
           idf.py set-target esp32s3
           idf.py build
+
+      - name: Assert K_ISR_SAFE helpers are IRAM-resident (issue #53)
+        # A K_ISR_SAFE (IRAM_ATTR) function that reaches a flash-resident
+        # helper cache-faults when called from an IRAM ISR during a flash
+        # op. The host suite cannot see this; verify symbol placement on
+        # the target ELF. OBJDUMP is set explicitly so the check does not
+        # depend on `file` being present in the image.
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          OBJDUMP=xtensa-esp32s3-elf-objdump \
+            tools/check_iram_symbols.sh test/build/boreas_test.elf
