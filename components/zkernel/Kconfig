@@ -11,22 +11,6 @@ menu "Boreas Kernel (zkernel)"
             the 32-bit target). Mirrors upstream Zephyr's
             CONFIG_RING_BUFFER_LARGE.
 
-    config ZKERNEL_MUTEX_DEBUG
-        bool "Enable mutex lock-ordering assertions"
-        default n
-        help
-            When enabled, each mutex is assigned a numeric lock order.
-            Acquiring mutexes out of order triggers an assertion failure.
-            Adds ~4 bytes per mutex and a small runtime check on lock.
-
-    config ZKERNEL_MUTEX_HOLD_WARNING_MS
-        int "Mutex hold-time warning threshold (ms)"
-        default 0
-        depends on ZKERNEL_MUTEX_DEBUG
-        help
-            Log a warning if a mutex is held longer than this many
-            milliseconds. Set to 0 to disable hold-time warnings.
-
     config ZKERNEL_THREAD_ANALYZER
         bool "Enable thread analyzer"
         default n

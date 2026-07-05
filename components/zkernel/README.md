@@ -113,9 +113,7 @@ k_mutex_unlock(&mtx);
 
 Returns `-EBUSY` (K_NO_WAIT), `-EAGAIN` (timeout), `-EWOULDBLOCK` (called from ISR), `-EPERM` (unlock not owner).
 
-Re-entrant (same thread can lock multiple times) with priority inheritance. Uses a non-recursive FreeRTOS mutex (which has PI) with manual re-entrancy tracking.
-
-**Extension:** `CONFIG_ZKERNEL_MUTEX_DEBUG` enables lock-ordering assertions and hold-time warnings.
+Re-entrant (same thread can lock multiple times) with priority inheritance. Thin wrapper over a FreeRTOS recursive mutex, which provides both.
 
 ## Message Queue (`k_msgq`)
 
@@ -296,8 +294,6 @@ Ordered initialization. Entries are emplaced into the `.sys_init_entries` linker
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `CONFIG_ZKERNEL_MUTEX_DEBUG` | n | Lock-ordering assertions + hold-time warnings |
-| `CONFIG_ZKERNEL_MUTEX_HOLD_WARNING_MS` | 0 | Hold-time warning threshold (0=disabled) |
 | `CONFIG_ZKERNEL_SYS_INIT` | y | Enable SYS_INIT framework |
 | `CONFIG_ZKERNEL_SYS_INIT_MAX_ENTRIES` | 32 | Max SYS_INIT registrations |
 | `CONFIG_ZKERNEL_FATAL_CAPTURE` | n | Save fatal context to NVS |

@@ -246,20 +246,21 @@ unsigned int k_sem_count_get(struct k_sem *sem);
 /* ----------------------------------------------------------------
  * Mutex
  *
- * Uses a non-recursive FreeRTOS mutex (which has priority inheritance)
- * with manual re-entrancy tracking. This gives Zephyr-compatible
- * behavior: re-entrant locking AND priority inheritance.
+ * Thin wrapper over a FreeRTOS recursive mutex, which already provides
+ * both re-entrant locking and priority inheritance -- matching Zephyr's
+ * k_mutex semantics.
+ *
+ * Divergences from upstream Zephyr (kernel/mutex.c):
+ *  - ISR context: Zephyr asserts (thread-only API); Boreas returns
+ *    -EWOULDBLOCK instead of faulting.
+ *  - k_mutex_unlock returns -EPERM whenever the caller isn't the owner,
+ *    including an unlocked mutex; Zephyr returns -EINVAL for the
+ *    never-locked case.
  * ---------------------------------------------------------------- */
 
 struct k_mutex {
 	SemaphoreHandle_t handle;
 	StaticSemaphore_t buffer;
-	TaskHandle_t owner; /* current owner for re-entrancy */
-	uint32_t count;     /* recursion depth */
-#if defined(CONFIG_ZKERNEL_MUTEX_DEBUG)
-	uint8_t order;      /* lock ordering -- lower must be acquired first */
-	uint32_t lock_time; /* tick count at lock acquisition */
-#endif
 };
 
 #define K_MUTEX_DEFINE(name) struct k_mutex name = {0}
@@ -267,11 +268,6 @@ struct k_mutex {
 int k_mutex_init(struct k_mutex *mutex);
 int k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout);
 int k_mutex_unlock(struct k_mutex *mutex);
-
-#if defined(CONFIG_ZKERNEL_MUTEX_DEBUG)
-int k_mutex_init_ordered(struct k_mutex *mutex, uint8_t order);
-#define K_MUTEX_DEFINE_ORDERED(name, ord) struct k_mutex name = {.order = (ord)}
-#endif
 
 /* ----------------------------------------------------------------
  * Message Queue
