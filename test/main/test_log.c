@@ -181,6 +181,35 @@ static void test_log_format_msg(void)
 	TEST_ASSERT_NOT_NULL(strstr(buf, "hello world"));
 }
 
+static void test_log_level_color(void)
+{
+	struct log_msg msg = {
+		.timestamp_ms = 1,
+		.level = LOG_LEVEL_ERR,
+		.module = "mymod",
+		.thread = "main",
+		.text = "boom",
+	};
+
+	char buf[128];
+	TEST_ASSERT_GREATER_THAN(0, zsys_log_format_msg(&msg, buf, sizeof(buf)));
+
+#if defined(CONFIG_ZSYS_LOG_COLOR)
+	/* ERR is red, and the level token stays intact between the escapes */
+	TEST_ASSERT_EQUAL_STRING("\033[0;31m", zsys_log_level_color(LOG_LEVEL_ERR));
+	TEST_ASSERT_EQUAL_STRING("\033[0;33m", zsys_log_level_color(LOG_LEVEL_WRN));
+	TEST_ASSERT_EQUAL_STRING("\033[0;32m", zsys_log_level_color(LOG_LEVEL_INF));
+	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(LOG_LEVEL_DBG));
+	TEST_ASSERT_NOT_NULL(strstr(buf, "\033[0;31m<ERR>\033[0m"));
+#else
+	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(LOG_LEVEL_ERR));
+	TEST_ASSERT_NULL(strchr(buf, '\033'));
+#endif
+	/* Out-of-range levels must not index off the table */
+	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(-1));
+	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(99));
+}
+
 static void test_log_thread_name(void)
 {
 	capture_reset();
@@ -292,6 +321,7 @@ void test_log_group(void)
 	RUN_TEST(test_log_runtime_level_filter);
 	RUN_TEST(test_log_all_levels);
 	RUN_TEST(test_log_format_msg);
+	RUN_TEST(test_log_level_color);
 	RUN_TEST(test_log_thread_name);
 	RUN_TEST(test_log_message_truncation);
 	RUN_TEST(test_log_backend_count);

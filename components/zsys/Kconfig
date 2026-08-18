@@ -31,6 +31,18 @@ menu "Boreas System Services (zsys)"
             Maximum length of the pre-formatted text field in each log message.
             Messages longer than this are truncated.
 
+    config ZSYS_LOG_COLOR
+        bool "Colorize the log level indicator (ANSI/VT100)"
+        default y
+        depends on ZSYS_LOG_MODULE
+        help
+            Wrap the level indicator in ANSI color codes: red ERR,
+            yellow WRN, green INF, uncolored DBG. Applies to both the
+            sync ("E") and deferred ("<ERR>") formats.
+
+            Independent of ESP-IDF's CONFIG_LOG_COLORS, which only
+            governs ESP_LOG* output.
+
     config ZSYS_LOG_MAX_BACKENDS
         int "Maximum number of log backends"
         default 4

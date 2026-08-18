@@ -130,9 +130,34 @@ void zsys_log_backend_register(const struct log_backend *backend);
  * Default message formatter
  * -------------------------------------------------------------------------- */
 
+/* ANSI reset sequence, or "" when CONFIG_ZSYS_LOG_COLOR is disabled. Pair with
+ * zsys_log_level_color(). */
+#if defined(CONFIG_ZSYS_LOG_COLOR)
+#define ZSYS_LOG_COLOR_RESET "\033[0m"
+#else
+#define ZSYS_LOG_COLOR_RESET ""
+#endif
+
+/**
+ * ANSI color escape for a log level -- red ERR, yellow WRN, green INF,
+ * "" for everything else. Returns "" for every level when
+ * CONFIG_ZSYS_LOG_COLOR is disabled.
+ *
+ * Only for backends writing to a terminal; zsys_log_format_msg() already
+ * applies color itself, so a backend whose transport is not a terminal
+ * should strip it or format the message fields directly.
+ *
+ * @param level  LOG_LEVEL_* value
+ * @return Escape sequence, never NULL. Close it with ZSYS_LOG_COLOR_RESET.
+ */
+const char *zsys_log_level_color(int level);
+
 /**
  * Format a log message into a human-readable string.
  * Output: [12.345] <INF> module: message text
+ *
+ * With CONFIG_ZSYS_LOG_COLOR the level token is wrapped in ANSI escapes
+ * (see zsys_log_level_color()), so the result is terminal-bound output.
  *
  * @param msg  Log message to format
  * @param buf  Output buffer

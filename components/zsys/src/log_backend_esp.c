@@ -39,8 +39,8 @@ static void esp_backend_put(const struct log_backend *backend, const struct log_
 	uint8_t lvl = (msg->level <= 4) ? msg->level : 0;
 
 	/* Match standard ESP-IDF format: LETTER (timestamp_ms) tag: text */
-	printf("%c (%lu) %s: %s\n", level_char[lvl], (unsigned long)esp_log_timestamp(),
-	       msg->module, msg->text);
+	printf("%s%c%s (%lu) %s: %s\n", zsys_log_level_color(lvl), level_char[lvl],
+	       ZSYS_LOG_COLOR_RESET, (unsigned long)esp_log_timestamp(), msg->module, msg->text);
 #endif
 }
 
