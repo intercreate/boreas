@@ -515,18 +515,20 @@ void zsys_log_hexdump(uint8_t level, const char *module, const void *data, size_
 int zsys_log_format_msg_color(const struct log_msg *msg, char *buf, size_t buf_size, bool color)
 {
 	(void)msg;
-	(void)buf;
-	(void)buf_size;
 	(void)color;
+
+	/* Returning 0 claims "wrote an empty string", so leave one behind --
+	 * a caller that prints buf on a non-negative return must not read
+	 * uninitialized memory. */
+	if (buf_size > 0) {
+		buf[0] = '\0';
+	}
 	return 0;
 }
 
 int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
 {
-	(void)msg;
-	(void)buf;
-	(void)buf_size;
-	return 0;
+	return zsys_log_format_msg_color(msg, buf, buf_size, false);
 }
 
 const char *zsys_log_level_color(int level)
