@@ -131,12 +131,12 @@ void zsys_log_backend_register(const struct log_backend *backend);
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief ANSI reset sequence, or "" when CONFIG_ZSYS_LOG_COLOR is disabled.
+ * @brief ANSI reset sequence, or "" when color is disabled.
  *
  * Closes a sequence opened with zsys_log_level_color().
  */
-#if defined(CONFIG_ZSYS_LOG_COLOR)
-#define ZSYS_LOG_COLOR_RESET "\033[0m"
+#if defined(CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR)
+#define ZSYS_LOG_COLOR_RESET "\x1B[0m"
 #else
 #define ZSYS_LOG_COLOR_RESET ""
 #endif
@@ -144,27 +144,24 @@ void zsys_log_backend_register(const struct log_backend *backend);
 /**
  * @brief ANSI color escape for a log level.
  *
- * Red ERR, yellow WRN, green INF, "" for DBG and everything else. Returns
- * "" for every level when CONFIG_ZSYS_LOG_COLOR is disabled. For backends
- * that format the log_msg fields themselves; backends using
+ * Follows Zephyr: bold red ERR, bold yellow WRN, and nothing else, unless
+ * CONFIG_ZSYS_LOG_INFO_COLOR_GREEN / CONFIG_ZSYS_LOG_DBG_COLOR_BLUE are set.
+ * Returns "" for every level when CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR is off.
+ *
+ * For backends that format the log_msg fields themselves; backends using
  * zsys_log_format_msg_color() get color applied for them.
  *
- * @note Diverges from Zephyr's log_output (subsys/logging/log_output.c) in
- *       three ways, all to match what ESP-IDF emits so a Boreas console is
- *       consistent with ESP_LOG* output on the same UART. Upstream uses bold
- *       codes ("\x1B[1;31m") where Boreas uses ESP-IDF's non-bold ("\033[0;31m");
- *       upstream gates INF green behind CONFIG_LOG_INFO_COLOR_GREEN and DBG
- *       blue behind CONFIG_LOG_DBG_COLOR_BLUE, while Boreas colors INF by
- *       default and never colors DBG; and upstream spans the whole line
- *       (color_prefix() through postfix_print()) where Boreas wraps only the
- *       level token.
+ * @note Governs LOG_* (zsys) output only. ESP_LOG* traffic from ESP-IDF
+ *       internals is colored by ESP-IDF under CONFIG_LOG_COLORS, which uses
+ *       a different, non-bold palette. A console carrying both will not look
+ *       uniform; that is deliberate, since matching ESP-IDF here would mean
+ *       diverging from Zephyr for the API Boreas actually implements.
  *
- * @note Levels with no color still pair with ZSYS_LOG_COLOR_RESET, so a DBG
- *       line carries a bare reset. Both references do the same -- ESP-IDF
- *       emits LOG_COLOR_D ("") followed by LOG_RESET_COLOR, and Zephyr's
+ * @note A level with no color still pairs with ZSYS_LOG_COLOR_RESET, so an
+ *       uncolored line carries a bare reset. Upstream does the same --
  *       color_print() falls back to LOG_COLOR_CODE_DEFAULT whenever
- *       colors[level] is NULL. It also clears color left set by another
- *       writer on the same UART.
+ *       colors[level] is NULL, on the prefix and the postfix both -- and it
+ *       clears color left set by another writer on the same UART.
  *
  * @param level  LOG_LEVEL_* value
  * @return Escape sequence, never NULL. Close it with ZSYS_LOG_COLOR_RESET.
@@ -176,9 +173,9 @@ const char *zsys_log_level_color(int level);
  *
  * Output: [12.345] <INF> module: message text
  *
- * Never emits color, whatever CONFIG_ZSYS_LOG_COLOR is set to, so the result
- * is safe for a file, network or RTT transport. Terminal-bound backends that
- * want color call zsys_log_format_msg_color() instead.
+ * Never emits color, whatever the color options are set to, so the result is
+ * safe for a file, network or RTT transport. Terminal-bound backends that want
+ * color call zsys_log_format_msg_color() instead.
  *
  * @param msg  Log message to format
  * @param buf  Output buffer
@@ -194,11 +191,14 @@ int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size);
  * As zsys_log_format_msg(), but the caller decides whether the level token is
  * wrapped in ANSI escapes -- the per-backend control Zephyr spells
  * LOG_OUTPUT_FLAG_COLORS on a struct log_output. Color is applied only when
- * @p color is true AND CONFIG_ZSYS_LOG_COLOR is enabled, so the Kconfig
- * remains a global off switch.
+ * @p color is true AND CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR is enabled, so the
+ * Kconfig remains a global off switch.
  *
  * Deferred mode hands every backend the same struct log_msg, so this is where
  * a terminal backend and a file backend part ways.
+ *
+ * @note As upstream, the color spans the level indicator through the end of
+ *       the message; the leading timestamp stays uncolored.
  *
  * @param msg  Log message to format
  * @param buf  Output buffer

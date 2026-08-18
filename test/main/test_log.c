@@ -197,7 +197,7 @@ static void test_log_level_color(void)
 	char expect[64];
 
 	/* The plain formatter is the pre-0.1.0 contract and must stay colorless
-	 * whatever CONFIG_ZSYS_LOG_COLOR is set to -- backends writing to a file,
+	 * whatever the color options are set to -- backends writing to a file,
 	 * socket or RTT channel depend on it. */
 	TEST_ASSERT_GREATER_THAN(0, zsys_log_format_msg(&msg, buf, sizeof(buf)));
 	TEST_ASSERT_NULL(strchr(buf, '\033'));
@@ -209,22 +209,36 @@ static void test_log_level_color(void)
 
 	/* With color=true every level's token is wrapped in whatever escape this
 	 * build defines. Asserted against the accessor rather than a literal, so
-	 * it holds under both CONFIG_ZSYS_LOG_COLOR settings. */
+	 * it holds under every color configuration. */
 	for (int lvl = LOG_LEVEL_NONE; lvl <= LOG_LEVEL_DBG; lvl++) {
 		msg.level = (uint8_t)lvl;
 		TEST_ASSERT_GREATER_THAN(0,
 					 zsys_log_format_msg_color(&msg, buf, sizeof(buf), true));
-		snprintf(expect, sizeof(expect), "%s<%s>%s", zsys_log_level_color(lvl), names[lvl],
-			 ZSYS_LOG_COLOR_RESET);
+		snprintf(expect, sizeof(expect), "%s<%s> mymod: boom%s", zsys_log_level_color(lvl),
+			 names[lvl], ZSYS_LOG_COLOR_RESET);
 		TEST_ASSERT_NOT_NULL(strstr(buf, expect));
+
+		/* Upstream leaves the timestamp outside the color */
+		TEST_ASSERT_EQUAL('[', buf[0]);
 	}
 
-#if defined(CONFIG_ZSYS_LOG_COLOR)
-	/* Pin the palette: ESP-IDF's non-bold codes, DBG deliberately uncolored */
-	TEST_ASSERT_EQUAL_STRING("\033[0;31m", zsys_log_level_color(LOG_LEVEL_ERR));
-	TEST_ASSERT_EQUAL_STRING("\033[0;33m", zsys_log_level_color(LOG_LEVEL_WRN));
-	TEST_ASSERT_EQUAL_STRING("\033[0;32m", zsys_log_level_color(LOG_LEVEL_INF));
+#if defined(CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR)
+	/* Pin upstream's palette: bold codes, ERR and WRN only by default */
+	TEST_ASSERT_EQUAL_STRING("\x1B[1;31m", zsys_log_level_color(LOG_LEVEL_ERR));
+	TEST_ASSERT_EQUAL_STRING("\x1B[1;33m", zsys_log_level_color(LOG_LEVEL_WRN));
+	TEST_ASSERT_EQUAL_STRING("\x1B[0m", ZSYS_LOG_COLOR_RESET);
+
+#if defined(CONFIG_ZSYS_LOG_INFO_COLOR_GREEN)
+	TEST_ASSERT_EQUAL_STRING("\x1B[1;32m", zsys_log_level_color(LOG_LEVEL_INF));
+#else
+	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(LOG_LEVEL_INF));
+#endif
+#if defined(CONFIG_ZSYS_LOG_DBG_COLOR_BLUE)
+	TEST_ASSERT_EQUAL_STRING("\x1B[1;34m", zsys_log_level_color(LOG_LEVEL_DBG));
+#else
 	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(LOG_LEVEL_DBG));
+#endif
+
 #else
 	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(LOG_LEVEL_ERR));
 	TEST_ASSERT_EQUAL_STRING("", ZSYS_LOG_COLOR_RESET);

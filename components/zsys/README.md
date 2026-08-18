@@ -166,7 +166,9 @@ Requires `CONFIG_ZSYS_RETRY=y` (default).
 | `CONFIG_ZSYS_LOG_MODE_DEFERRED` | n | Deferred output via ring buffer + thread |
 | `CONFIG_ZSYS_LOG_BUFFER_COUNT` | 32 | Deferred queue depth |
 | `CONFIG_ZSYS_LOG_MSG_MAX_LEN` | 80 | Max text per message |
-| `CONFIG_ZSYS_LOG_COLOR` | y | Colorize the level indicator (ANSI) |
+| `CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR` | y | Color ERR red / WRN yellow (Zephyr palette) |
+| `CONFIG_ZSYS_LOG_INFO_COLOR_GREEN` | n | Also color INF green |
+| `CONFIG_ZSYS_LOG_DBG_COLOR_BLUE` | n | Also color DBG blue |
 | `CONFIG_ZSYS_LOG_MAX_BACKENDS` | 4 | Max registered backends |
 | `CONFIG_ZSYS_LOG_THREAD_STACK_SIZE` | 2048 | Deferred output thread stack |
 | `CONFIG_ZSYS_LOG_THREAD_PRIORITY` | 2 | Deferred output thread priority |

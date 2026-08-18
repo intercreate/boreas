@@ -40,9 +40,11 @@ static void esp_backend_put(const struct log_backend *backend, const struct log_
 	static const char level_char[] = {'?', 'E', 'W', 'I', 'D'};
 	uint8_t lvl = (msg->level <= LOG_LEVEL_DBG) ? msg->level : 0;
 
-	/* Match standard ESP-IDF format: LETTER (timestamp_ms) tag: text */
-	printf("%s%c%s (%lu) %s: %s\n", zsys_log_level_color(lvl), level_char[lvl],
-	       ZSYS_LOG_COLOR_RESET, (unsigned long)esp_log_timestamp(), msg->module, msg->text);
+	/* Match standard ESP-IDF format: LETTER (timestamp_ms) tag: text.
+	 * The level leads here, so upstream's "level indicator through end of
+	 * message" span covers the whole line. */
+	printf("%s%c (%lu) %s: %s%s\n", zsys_log_level_color(lvl), level_char[lvl],
+	       (unsigned long)esp_log_timestamp(), msg->module, msg->text, ZSYS_LOG_COLOR_RESET);
 #endif
 }
 
