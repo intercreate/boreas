@@ -405,12 +405,18 @@ uint32_t zsys_log_get_dropped_count(void)
  * Default message formatter
  * ------------------------------------------------------------------------- */
 
-int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
+int zsys_log_format_msg_color(const struct log_msg *msg, char *buf, size_t buf_size, bool color)
 {
 	uint32_t ms = (uint32_t)msg->timestamp_ms;
 	return snprintf(buf, buf_size, "[%lu.%03lu] %s<%s>%s %s: %s", (unsigned long)(ms / 1000),
-			(unsigned long)(ms % 1000), zsys_log_level_color(msg->level),
-			level_to_str(msg->level), ZSYS_LOG_COLOR_RESET, msg->module, msg->text);
+			(unsigned long)(ms % 1000), color ? zsys_log_level_color(msg->level) : "",
+			level_to_str(msg->level), color ? ZSYS_LOG_COLOR_RESET : "", msg->module,
+			msg->text);
+}
+
+int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
+{
+	return zsys_log_format_msg_color(msg, buf, buf_size, false);
 }
 
 void zsys_log_hexdump(uint8_t level, const char *module, const void *data, size_t len,
@@ -504,6 +510,15 @@ void zsys_log_hexdump(uint8_t level, const char *module, const void *data, size_
 	(void)data;
 	(void)len;
 	(void)label;
+}
+
+int zsys_log_format_msg_color(const struct log_msg *msg, char *buf, size_t buf_size, bool color)
+{
+	(void)msg;
+	(void)buf;
+	(void)buf_size;
+	(void)color;
+	return 0;
 }
 
 int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)

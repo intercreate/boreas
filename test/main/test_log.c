@@ -9,6 +9,7 @@
 #include "zsys/log.h"
 #include "zsys/log_backend.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* -----------------------------------------------------------------------
@@ -183,6 +184,7 @@ static void test_log_format_msg(void)
 
 static void test_log_level_color(void)
 {
+	static const char *const names[] = {"NONE", "ERR", "WRN", "INF", "DBG"};
 	struct log_msg msg = {
 		.timestamp_ms = 1,
 		.level = LOG_LEVEL_ERR,
@@ -190,21 +192,44 @@ static void test_log_level_color(void)
 		.thread = "main",
 		.text = "boom",
 	};
-
 	char buf[128];
+	char plain[128];
+	char expect[64];
+
+	/* The plain formatter is the pre-0.1.0 contract and must stay colorless
+	 * whatever CONFIG_ZSYS_LOG_COLOR is set to -- backends writing to a file,
+	 * socket or RTT channel depend on it. */
 	TEST_ASSERT_GREATER_THAN(0, zsys_log_format_msg(&msg, buf, sizeof(buf)));
+	TEST_ASSERT_NULL(strchr(buf, '\033'));
+	TEST_ASSERT_NOT_NULL(strstr(buf, "<ERR>"));
+
+	/* ...and is exactly what the color variant produces with color=false */
+	TEST_ASSERT_GREATER_THAN(0, zsys_log_format_msg_color(&msg, plain, sizeof(plain), false));
+	TEST_ASSERT_EQUAL_STRING(buf, plain);
+
+	/* With color=true every level's token is wrapped in whatever escape this
+	 * build defines. Asserted against the accessor rather than a literal, so
+	 * it holds under both CONFIG_ZSYS_LOG_COLOR settings. */
+	for (int lvl = LOG_LEVEL_NONE; lvl <= LOG_LEVEL_DBG; lvl++) {
+		msg.level = (uint8_t)lvl;
+		TEST_ASSERT_GREATER_THAN(0,
+					 zsys_log_format_msg_color(&msg, buf, sizeof(buf), true));
+		snprintf(expect, sizeof(expect), "%s<%s>%s", zsys_log_level_color(lvl), names[lvl],
+			 ZSYS_LOG_COLOR_RESET);
+		TEST_ASSERT_NOT_NULL(strstr(buf, expect));
+	}
 
 #if defined(CONFIG_ZSYS_LOG_COLOR)
-	/* ERR is red, and the level token stays intact between the escapes */
+	/* Pin the palette: ESP-IDF's non-bold codes, DBG deliberately uncolored */
 	TEST_ASSERT_EQUAL_STRING("\033[0;31m", zsys_log_level_color(LOG_LEVEL_ERR));
 	TEST_ASSERT_EQUAL_STRING("\033[0;33m", zsys_log_level_color(LOG_LEVEL_WRN));
 	TEST_ASSERT_EQUAL_STRING("\033[0;32m", zsys_log_level_color(LOG_LEVEL_INF));
 	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(LOG_LEVEL_DBG));
-	TEST_ASSERT_NOT_NULL(strstr(buf, "\033[0;31m<ERR>\033[0m"));
 #else
 	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(LOG_LEVEL_ERR));
-	TEST_ASSERT_NULL(strchr(buf, '\033'));
+	TEST_ASSERT_EQUAL_STRING("", ZSYS_LOG_COLOR_RESET);
 #endif
+
 	/* Out-of-range levels must not index off the table */
 	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(-1));
 	TEST_ASSERT_EQUAL_STRING("", zsys_log_level_color(99));

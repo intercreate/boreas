@@ -78,6 +78,17 @@ static void my_put(const struct log_backend *b, const struct log_msg *msg) {
     zsys_log_format_msg(msg, buf, sizeof(buf));
     uart_write(buf);
 }
+```
+
+`zsys_log_format_msg()` never emits color, so its output is safe for a file,
+socket or RTT transport. A backend writing to a terminal calls
+`zsys_log_format_msg_color(msg, buf, sizeof(buf), true)` instead -- the
+per-backend switch Zephyr spells `LOG_OUTPUT_FLAG_COLORS`. Backends that format
+the `log_msg` fields themselves can reach for `zsys_log_level_color()` and
+`ZSYS_LOG_COLOR_RESET` directly. `CONFIG_ZSYS_LOG_COLOR=n` is a global off
+switch over all three.
+
+```c
 
 static const struct log_backend_api my_api = { .put = my_put };
 LOG_BACKEND_DEFINE(my_backend, &my_api, NULL);
@@ -155,6 +166,7 @@ Requires `CONFIG_ZSYS_RETRY=y` (default).
 | `CONFIG_ZSYS_LOG_MODE_DEFERRED` | n | Deferred output via ring buffer + thread |
 | `CONFIG_ZSYS_LOG_BUFFER_COUNT` | 32 | Deferred queue depth |
 | `CONFIG_ZSYS_LOG_MSG_MAX_LEN` | 80 | Max text per message |
+| `CONFIG_ZSYS_LOG_COLOR` | y | Colorize the level indicator (ANSI) |
 | `CONFIG_ZSYS_LOG_MAX_BACKENDS` | 4 | Max registered backends |
 | `CONFIG_ZSYS_LOG_THREAD_STACK_SIZE` | 2048 | Deferred output thread stack |
 | `CONFIG_ZSYS_LOG_THREAD_PRIORITY` | 2 | Deferred output thread priority |

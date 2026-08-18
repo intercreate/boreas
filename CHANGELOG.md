@@ -5,6 +5,16 @@ the merge PR.
 
 ## Unreleased
 
+- **Log level indicators are colorized by default** (#57) —
+  `CONFIG_ZSYS_LOG_COLOR=y` wraps the level token in ANSI codes on the console
+  backend: red ERR, yellow WRN, green INF, uncolored DBG. Set it to `n` to
+  restore plain output. Independent of ESP-IDF's `CONFIG_LOG_COLORS`, which
+  only governs `ESP_LOG*`.
+- **New: `zsys_log_format_msg_color()`** (#57) — per-backend color control,
+  mirroring Zephyr's `LOG_OUTPUT_FLAG_COLORS`. `zsys_log_format_msg()` is
+  unchanged and still never emits color, so existing custom backends writing to
+  a file, socket or RTT channel need no action.
+
 ## 0.1.0 — 2026-07-01
 
 First tagged release. The 2026-06 hardening series is complete; the API
