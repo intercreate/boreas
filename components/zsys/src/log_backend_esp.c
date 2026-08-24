@@ -17,6 +17,7 @@
 #include <stdio.h>
 
 #include "esp_log.h"
+#include "zsys/log.h"
 
 #if defined(CONFIG_ZSYS_LOG_MODULE)
 
@@ -32,15 +33,18 @@ static void esp_backend_put(const struct log_backend *backend, const struct log_
 #if defined(CONFIG_ZSYS_LOG_MODE_DEFERRED)
 	/* Structured format with the original log-time timestamp */
 	char buf[CONFIG_ZSYS_LOG_MSG_MAX_LEN + 64];
-	zsys_log_format_msg(msg, buf, sizeof(buf));
+	/* Console backend: a terminal, so opt in to color. */
+	zsys_log_format_msg_color(msg, buf, sizeof(buf), true);
 	printf("%s\n", buf);
 #else
 	static const char level_char[] = {'?', 'E', 'W', 'I', 'D'};
-	uint8_t lvl = (msg->level <= 4) ? msg->level : 0;
+	uint8_t lvl = (msg->level <= LOG_LEVEL_DBG) ? msg->level : 0;
 
-	/* Match standard ESP-IDF format: LETTER (timestamp_ms) tag: text */
-	printf("%c (%lu) %s: %s\n", level_char[lvl], (unsigned long)esp_log_timestamp(),
-	       msg->module, msg->text);
+	/* Match standard ESP-IDF format: LETTER (timestamp_ms) tag: text.
+	 * The level leads here, so upstream's "level indicator through end of
+	 * message" span covers the whole line. */
+	printf("%s%c (%lu) %s: %s%s\n", zsys_log_level_color(lvl), level_char[lvl],
+	       (unsigned long)esp_log_timestamp(), msg->module, msg->text, ZSYS_LOG_COLOR_RESET);
 #endif
 }
 

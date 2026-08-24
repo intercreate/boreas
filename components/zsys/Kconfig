@@ -31,6 +31,34 @@ menu "Boreas System Services (zsys)"
             Maximum length of the pre-formatted text field in each log message.
             Messages longer than this are truncated.
 
+    config ZSYS_LOG_BACKEND_SHOW_COLOR
+        bool "Colors in the backend"
+        default y
+        depends on ZSYS_LOG_MODULE
+        help
+            When enabled the backend prints errors in red and warnings in
+            yellow, mirroring Zephyr's CONFIG_LOG_BACKEND_SHOW_COLOR. As
+            upstream, the color spans the level indicator through the end
+            of the message, and INF/DBG are uncolored unless the options
+            below are set.
+
+            Governs LOG_* (zsys) output only. ESP_LOG* traffic from
+            ESP-IDF internals keeps ESP-IDF's own coloring, controlled by
+            CONFIG_LOG_COLORS.
+
+    config ZSYS_LOG_INFO_COLOR_GREEN
+        bool "Use green color for info level logs"
+        depends on ZSYS_LOG_BACKEND_SHOW_COLOR
+        help
+            Mirrors Zephyr's CONFIG_LOG_INFO_COLOR_GREEN. Off by default
+            upstream; enable for ESP-IDF-style output, where INF is green.
+
+    config ZSYS_LOG_DBG_COLOR_BLUE
+        bool "Use blue color for debug level logs"
+        depends on ZSYS_LOG_BACKEND_SHOW_COLOR
+        help
+            Mirrors Zephyr's CONFIG_LOG_DBG_COLOR_BLUE. Off by default.
+
     config ZSYS_LOG_MAX_BACKENDS
         int "Maximum number of log backends"
         default 4

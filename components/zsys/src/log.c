@@ -82,6 +82,42 @@ static const char *level_to_str(int level)
 	}
 }
 
+/* Upstream's codes and names, verbatim from zephyr/subsys/logging/log_output.c.
+ * Deliberately NOT ESP-IDF's LOG_COLOR_* (esp_log_color.h): those are non-bold
+ * and gated on CONFIG_LOG_COLORS, which governs ESP_LOG* only. */
+#define LOG_COLOR_CODE_DEFAULT "\x1B[0m"
+#define LOG_COLOR_CODE_RED     "\x1B[1;31m"
+#define LOG_COLOR_CODE_GREEN   "\x1B[1;32m"
+#define LOG_COLOR_CODE_YELLOW  "\x1B[1;33m"
+#define LOG_COLOR_CODE_BLUE    "\x1B[1;34m"
+
+const char *zsys_log_level_color(int level)
+{
+#if defined(CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR)
+	/* Mirrors upstream's colors[]: ERR and WRN only, unless the INF/DBG
+	 * options are set. */
+	static const char *const colors[] = {
+		"",                    /* NONE */
+		LOG_COLOR_CODE_RED,    /* ERR */
+		LOG_COLOR_CODE_YELLOW, /* WRN */
+#if defined(CONFIG_ZSYS_LOG_INFO_COLOR_GREEN)
+		LOG_COLOR_CODE_GREEN, /* INF */
+#else
+		"", /* INF */
+#endif
+#if defined(CONFIG_ZSYS_LOG_DBG_COLOR_BLUE)
+		LOG_COLOR_CODE_BLUE, /* DBG */
+#else
+		"", /* DBG */
+#endif
+	};
+	return (level >= 0 && level <= LOG_LEVEL_DBG) ? colors[level] : "";
+#else
+	(void)level;
+	return "";
+#endif
+}
+
 void zsys_log_list_modules(void)
 {
 	ESP_LOGI(TAG, "Registered log modules (%d):", module_count);
@@ -385,12 +421,22 @@ uint32_t zsys_log_get_dropped_count(void)
  * Default message formatter
  * ------------------------------------------------------------------------- */
 
-int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
+int zsys_log_format_msg_color(const struct log_msg *msg, char *buf, size_t buf_size, bool color)
 {
 	uint32_t ms = (uint32_t)msg->timestamp_ms;
-	return snprintf(buf, buf_size, "[%lu.%03lu] <%s> %s: %s", (unsigned long)(ms / 1000),
-			(unsigned long)(ms % 1000), level_to_str(msg->level), msg->module,
-			msg->text);
+
+	/* Upstream spans the color from the level indicator through the end of
+	 * the message, leaving the timestamp uncolored -- color_prefix() runs
+	 * after timestamp_print() and color_postfix() after the body. */
+	return snprintf(buf, buf_size, "[%lu.%03lu] %s<%s> %s: %s%s", (unsigned long)(ms / 1000),
+			(unsigned long)(ms % 1000), color ? zsys_log_level_color(msg->level) : "",
+			level_to_str(msg->level), msg->module, msg->text,
+			color ? ZSYS_LOG_COLOR_RESET : "");
+}
+
+int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
+{
+	return zsys_log_format_msg_color(msg, buf, buf_size, false);
 }
 
 void zsys_log_hexdump(uint8_t level, const char *module, const void *data, size_t len,
@@ -486,12 +532,29 @@ void zsys_log_hexdump(uint8_t level, const char *module, const void *data, size_
 	(void)label;
 }
 
-int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
+int zsys_log_format_msg_color(const struct log_msg *msg, char *buf, size_t buf_size, bool color)
 {
 	(void)msg;
-	(void)buf;
-	(void)buf_size;
+	(void)color;
+
+	/* Returning 0 claims "wrote an empty string", so leave one behind --
+	 * a caller that prints buf on a non-negative return must not read
+	 * uninitialized memory. */
+	if (buf_size > 0) {
+		buf[0] = '\0';
+	}
 	return 0;
+}
+
+int zsys_log_format_msg(const struct log_msg *msg, char *buf, size_t buf_size)
+{
+	return zsys_log_format_msg_color(msg, buf, buf_size, false);
+}
+
+const char *zsys_log_level_color(int level)
+{
+	(void)level;
+	return "";
 }
 
 #endif

@@ -5,6 +5,22 @@ the merge PR.
 
 ## Unreleased
 
+- **LOG_* output is colorized by default, using Zephyr's palette** (#57) —
+  `CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR=y` (mirroring upstream's
+  `CONFIG_LOG_BACKEND_SHOW_COLOR`) prints errors in bold red and warnings in
+  bold yellow, spanning the level indicator through the end of the message with
+  the timestamp left uncolored. INF and DBG are uncolored unless
+  `CONFIG_ZSYS_LOG_INFO_COLOR_GREEN` / `CONFIG_ZSYS_LOG_DBG_COLOR_BLUE` are set,
+  as upstream. Set the parent symbol to `n` for plain output.
+
+  Governs `LOG_*` (zsys) output only. `ESP_LOG*` traffic from ESP-IDF internals
+  keeps ESP-IDF's own non-bold palette under `CONFIG_LOG_COLORS`, so a console
+  carrying both will not look uniform.
+- **New: `zsys_log_format_msg_color()`** (#57) — per-backend color control,
+  mirroring Zephyr's `LOG_OUTPUT_FLAG_COLORS`. `zsys_log_format_msg()` is
+  unchanged and still never emits color, so existing custom backends writing to
+  a file, socket or RTT channel need no action.
+
 ## 0.1.0 — 2026-07-01
 
 First tagged release. The 2026-06 hardening series is complete; the API

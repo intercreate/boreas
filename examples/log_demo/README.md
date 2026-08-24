@@ -72,6 +72,8 @@ I (575) log_demo: === Demo complete ===
 static void my_put(const struct log_backend *b, const struct log_msg *msg)
 {
     char buf[128];
+    /* Colorless -- safe for a file, socket or RTT channel. A terminal backend
+       calls zsys_log_format_msg_color(msg, buf, sizeof(buf), true) instead. */
     zsys_log_format_msg(msg, buf, sizeof(buf));
     my_transport_write(buf);   /* UART, RTT, network, file, etc. */
 }
@@ -91,6 +93,9 @@ The backend is picked up automatically at `zsys_log_init()` time — on ESP targ
 | `CONFIG_ZSYS_LOG_MODE_DEFERRED` | n | Enable deferred mode (ring buffer + output thread) |
 | `CONFIG_ZSYS_LOG_BUFFER_COUNT` | 32 | Message queue depth (deferred mode) |
 | `CONFIG_ZSYS_LOG_MSG_MAX_LEN` | 80 | Max text length per message |
+| `CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR` | y | Color ERR red / WRN yellow (Zephyr palette) |
+| `CONFIG_ZSYS_LOG_INFO_COLOR_GREEN` | n | Also color INF green |
+| `CONFIG_ZSYS_LOG_DBG_COLOR_BLUE` | n | Also color DBG blue |
 | `CONFIG_ZSYS_LOG_MAX_BACKENDS` | 4 | Maximum number of backends |
 
 When `CONFIG_ZSYS_LOG_MODULE` is disabled, `LOG_*` macros fall back to `ESP_LOG*` with zero overhead.
