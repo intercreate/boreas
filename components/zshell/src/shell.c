@@ -19,13 +19,19 @@ LOG_MODULE_REGISTER(shell, LOG_LEVEL_INF);
  * Character Processing
  * ---------------------------------------------------------------- */
 
-static void shell_print_prompt(struct shell *sh)
+void shell_print_prompt(const struct shell *sh)
 {
 	const char *prompt = sh->default_prompt ? sh->default_prompt : CONFIG_ZSHELL_PROMPT;
+
 	shell_write(sh, prompt, strlen(prompt));
 }
 
-static void shell_process_char(struct shell *sh, char ch)
+void shell_write_cmd(const struct shell *sh, uint16_t off, uint16_t len)
+{
+	shell_write(sh, &sh->ctx.cmd_buff[off], len);
+}
+
+void shell_process_char(struct shell *sh, char ch)
 {
 	/* VT100 escape sequence handling */
 #ifdef CONFIG_ZSHELL_VT100
@@ -74,8 +80,8 @@ static void shell_process_char(struct shell *sh, char ch)
 			/* Erase on terminal: backspace, rewrite rest, clear trailing */
 			shell_write(sh, "\b", 1);
 			if (sh->ctx.cmd_buff_pos < sh->ctx.cmd_buff_len) {
-				shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
-					    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+				shell_write_cmd(sh, sh->ctx.cmd_buff_pos,
+						sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
 				shell_write(sh, " \b", 2);
 				/* Move cursor back */
 				uint16_t move = sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos;
@@ -104,8 +110,8 @@ static void shell_process_char(struct shell *sh, char ch)
 
 	case 0x05: /* Ctrl-E: move cursor to end */
 		if (sh->ctx.cmd_buff_pos < sh->ctx.cmd_buff_len) {
-			shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
-				    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos,
+					sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
 			sh->ctx.cmd_buff_pos = sh->ctx.cmd_buff_len;
 		}
 		break;
@@ -146,8 +152,8 @@ static void shell_process_char(struct shell *sh, char ch)
 			for (uint16_t i = 0; i < removed; i++) {
 				shell_write(sh, "\b", 1);
 			}
-			shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
-				    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos,
+					sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
 			for (uint16_t i = 0; i < removed; i++) {
 				shell_write(sh, " ", 1);
 			}
@@ -163,7 +169,7 @@ static void shell_process_char(struct shell *sh, char ch)
 		shell_print_prompt(sh);
 		/* Reprint current line */
 		if (sh->ctx.cmd_buff_len > 0) {
-			shell_write(sh, sh->ctx.cmd_buff, sh->ctx.cmd_buff_len);
+			shell_write_cmd(sh, 0, sh->ctx.cmd_buff_len);
 		}
 		break;
 
@@ -191,8 +197,8 @@ static void shell_process_char(struct shell *sh, char ch)
 
 			if (sh->ctx.echo) {
 				/* Write from cursor to end, then move cursor back */
-				shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos - 1],
-					    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos + 1);
+				shell_write_cmd(sh, sh->ctx.cmd_buff_pos - 1,
+						sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos + 1);
 				uint16_t move = sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos;
 				for (uint16_t i = 0; i < move; i++) {
 					shell_write(sh, "\b", 1);

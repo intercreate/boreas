@@ -173,7 +173,6 @@ void shell_completion(struct shell *sh)
 	}
 
 	/* Reprint prompt + current line */
-	const char *prompt = sh->default_prompt ? sh->default_prompt : CONFIG_ZSHELL_PROMPT;
-	shell_write(sh, prompt, strlen(prompt));
-	shell_write(sh, sh->ctx.cmd_buff, sh->ctx.cmd_buff_len);
+	shell_print_prompt(sh);
+	shell_write_cmd(sh, 0, sh->ctx.cmd_buff_len);
 }

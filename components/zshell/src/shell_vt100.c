@@ -36,16 +36,12 @@ void shell_vt100_process(struct shell *sh, char ch)
 				if (shell_history_get(&sh->history, true, tmp, &len)) {
 					/* Clear current line on terminal */
 					shell_write(sh, "\r\033[K", 4);
-					/* Reprint prompt */
-					const char *prompt = sh->default_prompt
-								     ? sh->default_prompt
-								     : CONFIG_ZSHELL_PROMPT;
-					shell_write(sh, prompt, strlen(prompt));
+					shell_print_prompt(sh);
 					/* Load history entry */
 					memcpy(sh->ctx.cmd_buff, tmp, len);
 					sh->ctx.cmd_buff_len = len;
 					sh->ctx.cmd_buff_pos = len;
-					shell_write(sh, sh->ctx.cmd_buff, len);
+					shell_write_cmd(sh, 0, len);
 				}
 			}
 #endif
@@ -58,21 +54,15 @@ void shell_vt100_process(struct shell *sh, char ch)
 				char tmp[CONFIG_ZSHELL_CMD_BUFF_SIZE];
 				if (shell_history_get(&sh->history, false, tmp, &len)) {
 					shell_write(sh, "\r\033[K", 4);
-					const char *prompt = sh->default_prompt
-								     ? sh->default_prompt
-								     : CONFIG_ZSHELL_PROMPT;
-					shell_write(sh, prompt, strlen(prompt));
+					shell_print_prompt(sh);
 					memcpy(sh->ctx.cmd_buff, tmp, len);
 					sh->ctx.cmd_buff_len = len;
 					sh->ctx.cmd_buff_pos = len;
-					shell_write(sh, sh->ctx.cmd_buff, len);
+					shell_write_cmd(sh, 0, len);
 				} else {
 					/* Past newest -- clear line */
 					shell_write(sh, "\r\033[K", 4);
-					const char *prompt = sh->default_prompt
-								     ? sh->default_prompt
-								     : CONFIG_ZSHELL_PROMPT;
-					shell_write(sh, prompt, strlen(prompt));
+					shell_print_prompt(sh);
 					sh->ctx.cmd_buff_len = 0;
 					sh->ctx.cmd_buff_pos = 0;
 				}
@@ -118,10 +108,9 @@ void shell_vt100_process(struct shell *sh, char ch)
 								sh->ctx.cmd_buff_pos - 1);
 						sh->ctx.cmd_buff_len--;
 						/* Rewrite from cursor, clear trailing char */
-						shell_write(sh,
-							    &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
-							    sh->ctx.cmd_buff_len -
-								    sh->ctx.cmd_buff_pos);
+						shell_write_cmd(sh, sh->ctx.cmd_buff_pos,
+								sh->ctx.cmd_buff_len -
+									sh->ctx.cmd_buff_pos);
 						shell_write(sh, " ", 1);
 						uint16_t move = sh->ctx.cmd_buff_len -
 								sh->ctx.cmd_buff_pos + 1;

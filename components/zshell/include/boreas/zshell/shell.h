@@ -215,6 +215,12 @@ void shell_builtins_register(void);
 const struct shell_static_entry *shell_cmd_find(const struct shell_static_entry *cmds, size_t count,
 						const char *name);
 
+/* Line editing */
+void shell_process_char(struct shell *sh, char ch);
+void shell_print_prompt(const struct shell *sh);
+/* Echo len chars of cmd_buff starting at off (the one place the buffer reaches the terminal) */
+void shell_write_cmd(const struct shell *sh, uint16_t off, uint16_t len);
+
 /* Parsing */
 size_t shell_make_argv(char *line, char **argv, size_t max_argc);
 int shell_execute(struct shell *sh);
