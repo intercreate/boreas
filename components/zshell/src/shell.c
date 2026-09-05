@@ -39,7 +39,10 @@ int shell_prompt_change(const struct shell *sh, const char *prompt)
 	if (prompt == NULL || strlen(prompt) >= CONFIG_ZSHELL_PROMPT_BUFF_SIZE) {
 		return -EINVAL;
 	}
+	/* Never interleave with an in-progress write; see @note on the declaration */
+	k_mutex_lock(&ctx->wr_mtx, K_FOREVER);
 	strcpy(ctx->prompt, prompt);
+	k_mutex_unlock(&ctx->wr_mtx);
 	return 0;
 #else
 	(void)sh;
@@ -305,6 +308,8 @@ static void shell_thread_entry(void *p1, void *p2, void *p3)
 
 int shell_init(struct shell *sh, const struct shell_transport *transport, const char *prompt)
 {
+	static bool root_applied;
+
 	memset(&sh->ctx, 0, sizeof(sh->ctx));
 
 	sh->iface = transport;
@@ -345,9 +350,15 @@ int shell_init(struct shell *sh, const struct shell_transport *transport, const 
 	shell_builtins_register();
 	shell_cmd_sort_root();
 
-	if (CONFIG_ZSHELL_CMD_ROOT[0] != '\0' && shell_set_root_cmd(CONFIG_ZSHELL_CMD_ROOT) != 0) {
-		LOG_WRN("CONFIG_ZSHELL_CMD_ROOT '%s' is not a root command; using full tree",
-			CONFIG_ZSHELL_CMD_ROOT);
+	/* The selection is shared by all instances, so apply the Kconfig root
+	 * once: a second shell_init() after a login must not relock the first. */
+	if (CONFIG_ZSHELL_CMD_ROOT[0] != '\0' && !root_applied) {
+		root_applied = true;
+		if (shell_set_root_cmd(CONFIG_ZSHELL_CMD_ROOT) != 0) {
+			LOG_WRN("CONFIG_ZSHELL_CMD_ROOT '%s' is not a root command; using full "
+				"tree",
+				CONFIG_ZSHELL_CMD_ROOT);
+		}
 	}
 
 #ifdef CONFIG_ZSHELL_HISTORY

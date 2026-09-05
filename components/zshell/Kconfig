@@ -76,7 +76,8 @@ menu "Boreas Shell (zshell)"
             Restrict dispatch to this root command when the shell starts:
             typed input becomes its arguments and no other root command is
             reachable. Empty means the full command tree. Change at runtime
-            with shell_set_root_cmd(). Mirrors CONFIG_SHELL_CMD_ROOT.
+            with shell_set_root_cmd(). Applied when the first shell instance
+            initializes. Mirrors CONFIG_SHELL_CMD_ROOT.
 
     config ZSHELL_HISTORY
         bool "Enable command history"

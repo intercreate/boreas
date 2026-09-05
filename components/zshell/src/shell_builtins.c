@@ -23,24 +23,22 @@ static int cmd_help(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc > 1) {
 		/* Help for a specific command */
-		for (size_t i = 0; i < _shell_root_cmd_count; i++) {
-			if (strcmp(_shell_root_cmds[i]->syntax, argv[1]) == 0) {
-				const struct shell_static_entry *cmd = _shell_root_cmds[i];
-				shell_print(sh, "%s - %s", cmd->syntax, cmd->help ? cmd->help : "");
-				if (cmd->subcmd != NULL && cmd->subcmd->entry != NULL) {
-					shell_print(sh, "Subcommands:");
-					const struct shell_static_entry *entries =
-						cmd->subcmd->entry;
-					for (size_t j = 0; entries[j].syntax != NULL; j++) {
-						shell_print(sh, "  %-16s %s", entries[j].syntax,
-							    entries[j].help ? entries[j].help : "");
-					}
-				}
-				return 0;
+		const struct shell_static_entry *cmd = shell_root_cmd_find(argv[1]);
+
+		if (cmd == NULL) {
+			shell_error(sh, "Unknown command: %s", argv[1]);
+			return -1;
+		}
+		shell_print(sh, "%s - %s", cmd->syntax, cmd->help ? cmd->help : "");
+		if (cmd->subcmd != NULL && cmd->subcmd->entry != NULL) {
+			shell_print(sh, "Subcommands:");
+			const struct shell_static_entry *entries = cmd->subcmd->entry;
+			for (size_t j = 0; entries[j].syntax != NULL; j++) {
+				shell_print(sh, "  %-16s %s", entries[j].syntax,
+					    entries[j].help ? entries[j].help : "");
 			}
 		}
-		shell_error(sh, "Unknown command: %s", argv[1]);
-		return -1;
+		return 0;
 	}
 
 	/* List all root commands */

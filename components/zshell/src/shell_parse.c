@@ -55,6 +55,17 @@ size_t shell_make_argv(char *line, char **argv, size_t max_argc)
 	return argc;
 }
 
+size_t shell_make_argv_root(char *line, char **argv)
+{
+	const struct shell_static_entry *root = shell_root_cmd_get();
+
+	if (root == NULL) {
+		return shell_make_argv(line, argv, CONFIG_ZSHELL_MAX_ARGC);
+	}
+	argv[0] = (char *)root->syntax;
+	return 1 + shell_make_argv(line, &argv[1], CONFIG_ZSHELL_MAX_ARGC);
+}
+
 /**
  * Find a subcommand by name within a subcmd set.
  */
@@ -90,18 +101,11 @@ int shell_execute(struct shell *sh)
 	memcpy(line_copy, sh->ctx.cmd_buff, sh->ctx.cmd_buff_len);
 	line_copy[sh->ctx.cmd_buff_len] = '\0';
 
-	if (cmd != NULL) {
-		/* Root selected: typed input is its argument list */
-		argv[0] = (char *)cmd->syntax;
-		argc = 1 + shell_make_argv(line_copy, &argv[1], CONFIG_ZSHELL_MAX_ARGC);
-		if (argc == 1) {
-			return 0; /* empty line */
-		}
-	} else {
-		argc = shell_make_argv(line_copy, argv, CONFIG_ZSHELL_MAX_ARGC);
-		if (argc == 0) {
-			return 0; /* empty line */
-		}
+	argc = shell_make_argv_root(line_copy, argv);
+	if (argc == (cmd != NULL ? 1 : 0)) {
+		return 0; /* empty line */
+	}
+	if (cmd == NULL) {
 		cmd = shell_root_cmd_find(argv[0]);
 		if (cmd == NULL) {
 			shell_error(sh, "Unknown command: %s", argv[0]);

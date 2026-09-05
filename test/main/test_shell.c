@@ -510,6 +510,14 @@ static void test_shell_root_completion(void)
 	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "get"));
 	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "set"));
 	TEST_ASSERT_NULL(strstr(cap_buf, "other"));
+
+	/* Completed text stays obscured */
+	feed("\x03");
+	shell_obscure_set(&tsh, true);
+	cap_clear();
+	feed("g\t");
+	TEST_ASSERT_EQUAL_MEMORY("get ", tsh.ctx.cmd_buff, 4);
+	TEST_ASSERT_EQUAL_STRING("*** ", cap_buf);
 	harness_teardown();
 }
 #endif

@@ -26,21 +26,14 @@ void shell_completion(struct shell *sh)
 {
 	char line_copy[CONFIG_ZSHELL_CMD_BUFF_SIZE];
 	char *argv[CONFIG_ZSHELL_MAX_ARGC + 1];
-	const struct shell_static_entry *root = shell_root_cmd_get();
 	size_t argc;
 
 	/* Copy buffer up to cursor position */
 	memcpy(line_copy, sh->ctx.cmd_buff, sh->ctx.cmd_buff_pos);
 	line_copy[sh->ctx.cmd_buff_pos] = '\0';
 
-	/* A selected root sits at argv[0], as in shell_execute(); the typed
-	 * tokens then only ever walk beneath it. */
-	if (root != NULL) {
-		argv[0] = (char *)root->syntax;
-		argc = 1 + shell_make_argv(line_copy, &argv[1], CONFIG_ZSHELL_MAX_ARGC);
-	} else {
-		argc = shell_make_argv(line_copy, argv, CONFIG_ZSHELL_MAX_ARGC);
-	}
+	/* A selected root sits at argv[0]; typed tokens only ever walk beneath it */
+	argc = shell_make_argv_root(line_copy, argv);
 
 	/* Determine if we're completing a partial token or starting a new one */
 	bool completing_partial =
@@ -135,11 +128,11 @@ void shell_completion(struct shell *sh)
 		/* Insert remaining chars */
 		if (sh->ctx.cmd_buff_len + insert_len + 1 < CONFIG_ZSHELL_CMD_BUFF_SIZE) {
 			memcpy(&sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos], insert, insert_len);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos, insert_len);
 			sh->ctx.cmd_buff_pos += insert_len;
 			sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos] = ' ';
 			sh->ctx.cmd_buff_pos++;
 			sh->ctx.cmd_buff_len = sh->ctx.cmd_buff_pos;
-			shell_write(sh, insert, insert_len);
 			shell_write(sh, " ", 1);
 		}
 		return;
@@ -161,9 +154,9 @@ void shell_completion(struct shell *sh)
 		const char *insert = matches[0]->syntax + partial_len;
 		if (sh->ctx.cmd_buff_len + insert_len < CONFIG_ZSHELL_CMD_BUFF_SIZE) {
 			memcpy(&sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos], insert, insert_len);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos, insert_len);
 			sh->ctx.cmd_buff_pos += insert_len;
 			sh->ctx.cmd_buff_len = sh->ctx.cmd_buff_pos;
-			shell_write(sh, insert, insert_len);
 		}
 	}
 
