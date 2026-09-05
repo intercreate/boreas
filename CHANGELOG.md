@@ -5,6 +5,14 @@ the merge PR.
 
 ## Unreleased
 
+- **New: zshell login primitives** (#59) — `shell_obscure_set()`,
+  `shell_set_root_cmd()`, `shell_prompt_change()` and `shell_history_purge()`,
+  with `CONFIG_ZSHELL_START_OBSCURED`, `CONFIG_ZSHELL_CMD_ROOT`,
+  `CONFIG_ZSHELL_PROMPT_CHANGE` (default y) and
+  `CONFIG_ZSHELL_PROMPT_BUFF_SIZE` (default 20), mirroring upstream. The
+  shell supplies the mechanics; the application owns the credential check, as
+  in Zephyr's login sample (`examples/shell_demo` + `sdkconfig.login`).
+  `struct shell_ctx` grows by the prompt buffer when `PROMPT_CHANGE` is on.
 - **LOG_* output is colorized by default, using Zephyr's palette** (#57) —
   `CONFIG_ZSYS_LOG_BACKEND_SHOW_COLOR=y` (mirroring upstream's
   `CONFIG_LOG_BACKEND_SHOW_COLOR`) prints errors in bold red and warnings in
