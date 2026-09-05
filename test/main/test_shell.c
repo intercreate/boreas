@@ -6,6 +6,7 @@
  * line editing and dispatch (via a capture transport, no shell thread).
  */
 
+#include <errno.h>
 #include <string.h>
 
 #include "unity.h"
@@ -253,10 +254,21 @@ static struct shell_static_entry tcmd = {
 	.handler = tcmd_handler,
 };
 
+static int other_hits;
+
+static int other_handler(const struct shell *sh, size_t argc, char **argv)
+{
+	(void)sh;
+	(void)argc;
+	(void)argv;
+	other_hits++;
+	return 0;
+}
+
 static struct shell_static_entry other = {
 	.syntax = "other",
 	.help = "other command",
-	.handler = tcmd_handler,
+	.handler = other_handler,
 };
 
 static size_t saved_root_count;
@@ -280,6 +292,9 @@ static void harness_setup(void)
 	memset(&tsh, 0, sizeof(tsh));
 	tsh.iface = &cap_transport;
 	tsh.default_prompt = "t> ";
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	strcpy(tsh.ctx.prompt, "t> ");
+#endif
 	k_mutex_init(&tsh.ctx.wr_mtx);
 	tsh.ctx.echo = true;
 	tsh.ctx.state = SHELL_STATE_ACTIVE;
@@ -287,11 +302,13 @@ static void harness_setup(void)
 	shell_history_init(&tsh.history);
 #endif
 	seen_argc = 0;
+	other_hits = 0;
 	cap_clear();
 }
 
 static void harness_teardown(void)
 {
+	shell_set_root_cmd(NULL);
 	_shell_root_cmd_count = saved_root_count;
 	memcpy(_shell_root_cmds, saved_root, saved_root_count * sizeof(saved_root[0]));
 }
@@ -346,6 +363,210 @@ static void test_shell_dispatch_unknown(void)
 }
 
 /* ----------------------------------------------------------------
+ * Obscured input
+ * ---------------------------------------------------------------- */
+
+static void test_shell_obscure_set_returns_previous(void)
+{
+	harness_setup();
+	TEST_ASSERT_EQUAL(0, shell_obscure_set(&tsh, true));
+	TEST_ASSERT_EQUAL(1, shell_obscure_set(&tsh, true));
+	TEST_ASSERT_EQUAL(1, shell_obscure_set(&tsh, false));
+	TEST_ASSERT_EQUAL(0, shell_obscure_set(&tsh, false));
+	TEST_ASSERT_EQUAL(-EINVAL, shell_obscure_set(NULL, true));
+	harness_teardown();
+}
+
+static void test_shell_obscure_insert_delete(void)
+{
+	harness_setup();
+	shell_obscure_set(&tsh, true);
+
+	feed("ab");
+	TEST_ASSERT_EQUAL_STRING("**", cap_buf);
+	TEST_ASSERT_EQUAL_MEMORY("ab", tsh.ctx.cmd_buff, 2);
+
+	cap_clear();
+	feed("\b");
+	TEST_ASSERT_EQUAL_STRING("\b \b", cap_buf);
+	TEST_ASSERT_EQUAL(1, tsh.ctx.cmd_buff_len);
+
+#ifdef CONFIG_ZSHELL_VT100
+	/* Insert in the middle: the rewritten tail must stay obscured */
+	cap_clear();
+	feed("\033[D"
+	     "z");
+	TEST_ASSERT_EQUAL_MEMORY("za", tsh.ctx.cmd_buff, 2);
+	TEST_ASSERT_NULL(strchr(cap_buf, 'a'));
+	TEST_ASSERT_NULL(strchr(cap_buf, 'z'));
+#endif
+
+	/* Dispatch still sees the real text */
+	feed("\r");
+	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "Unknown command: za"));
+	harness_teardown();
+}
+
+/* Not obscured unless CONFIG_ZSHELL_START_OBSCURED (off in the test config) */
+static void test_shell_obscure_default_off(void)
+{
+	harness_setup();
+	feed("a");
+	TEST_ASSERT_EQUAL_STRING("a", cap_buf);
+	harness_teardown();
+}
+
+/* ----------------------------------------------------------------
+ * Root command selection
+ * ---------------------------------------------------------------- */
+
+static void test_shell_set_root_cmd_valid_invalid(void)
+{
+	harness_setup();
+	TEST_ASSERT_EQUAL(-EINVAL, shell_set_root_cmd("bogus"));
+	TEST_ASSERT_NULL(shell_root_cmd_get());
+	TEST_ASSERT_EQUAL(0, shell_set_root_cmd("tcmd"));
+	TEST_ASSERT_EQUAL_PTR(&tcmd, shell_root_cmd_get());
+	/* A bad name leaves the current selection alone */
+	TEST_ASSERT_EQUAL(-EINVAL, shell_set_root_cmd("bogus"));
+	TEST_ASSERT_EQUAL_PTR(&tcmd, shell_root_cmd_get());
+	TEST_ASSERT_EQUAL(0, shell_set_root_cmd(NULL));
+	TEST_ASSERT_NULL(shell_root_cmd_get());
+	harness_teardown();
+}
+
+static void test_shell_root_dispatch_beneath(void)
+{
+	harness_setup();
+	shell_set_root_cmd("tcmd");
+
+	/* Subcommand of the root */
+	feed("set 7\r");
+	TEST_ASSERT_EQUAL(2, seen_argc);
+	TEST_ASSERT_EQUAL_STRING("set", seen_argv[0]);
+	TEST_ASSERT_EQUAL_STRING("7", seen_argv[1]);
+
+	/* Free text goes to the root's own handler as arguments */
+	feed("secret\r");
+	TEST_ASSERT_EQUAL(2, seen_argc);
+	TEST_ASSERT_EQUAL_STRING("tcmd", seen_argv[0]);
+	TEST_ASSERT_EQUAL_STRING("secret", seen_argv[1]);
+
+	/* Blank line does nothing */
+	seen_argc = 0;
+	feed("   \r");
+	TEST_ASSERT_EQUAL(0, seen_argc);
+	harness_teardown();
+}
+
+static void test_shell_root_rejects_other_roots(void)
+{
+	harness_setup();
+	shell_set_root_cmd("tcmd");
+
+	feed("other\r");
+	TEST_ASSERT_EQUAL(0, other_hits);
+	TEST_ASSERT_EQUAL_STRING("other", seen_argv[1]);
+
+	/* help is itself a root command, so it is unreachable too */
+	feed("help\r");
+	TEST_ASSERT_NULL(strstr(cap_buf, "other command"));
+	harness_teardown();
+}
+
+static void test_shell_root_clear_restores_tree(void)
+{
+	harness_setup();
+	shell_set_root_cmd("tcmd");
+	shell_set_root_cmd(NULL);
+
+	feed("other\r");
+	TEST_ASSERT_EQUAL(1, other_hits);
+	harness_teardown();
+}
+
+#ifdef CONFIG_ZSHELL_TAB_COMPLETION
+static void test_shell_root_completion(void)
+{
+	harness_setup();
+	shell_set_root_cmd("tcmd");
+
+	/* Completes beneath the root */
+	feed("g\t");
+	TEST_ASSERT_EQUAL(4, tsh.ctx.cmd_buff_len);
+	TEST_ASSERT_EQUAL_MEMORY("get ", tsh.ctx.cmd_buff, 4);
+
+	/* Does not see other root commands */
+	feed("\x03");
+	cap_clear();
+	feed("o\t");
+	TEST_ASSERT_EQUAL(1, tsh.ctx.cmd_buff_len);
+	TEST_ASSERT_EQUAL_STRING("o\a", cap_buf);
+
+	/* Empty line lists only the root's subcommands */
+	feed("\x03");
+	cap_clear();
+	feed("\t");
+	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "get"));
+	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "set"));
+	TEST_ASSERT_NULL(strstr(cap_buf, "other"));
+	harness_teardown();
+}
+#endif
+
+/* ----------------------------------------------------------------
+ * Prompt change
+ * ---------------------------------------------------------------- */
+
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+static void test_shell_prompt_change(void)
+{
+	char too_long[CONFIG_ZSHELL_PROMPT_BUFF_SIZE + 1];
+
+	memset(too_long, 'x', sizeof(too_long) - 1);
+	too_long[sizeof(too_long) - 1] = '\0';
+
+	harness_setup();
+	TEST_ASSERT_EQUAL(-EINVAL, shell_prompt_change(&tsh, NULL));
+	TEST_ASSERT_EQUAL(-EINVAL, shell_prompt_change(&tsh, too_long));
+	/* Exactly BUFF_SIZE - 1 chars fits */
+	too_long[CONFIG_ZSHELL_PROMPT_BUFF_SIZE - 1] = '\0';
+	TEST_ASSERT_EQUAL(0, shell_prompt_change(&tsh, too_long));
+
+	TEST_ASSERT_EQUAL(0, shell_prompt_change(&tsh, "login: "));
+	feed("\r");
+	TEST_ASSERT_EQUAL_STRING("\r\nlogin: ", cap_buf);
+	harness_teardown();
+}
+#endif
+
+/* ----------------------------------------------------------------
+ * History purge
+ * ---------------------------------------------------------------- */
+
+#ifdef CONFIG_ZSHELL_HISTORY
+static void test_shell_history_purge(void)
+{
+	char buf[CONFIG_ZSHELL_CMD_BUFF_SIZE];
+	uint16_t len;
+
+	harness_setup();
+	feed("hunter2\r");
+	TEST_ASSERT_TRUE(shell_history_get(&tsh.history, true, buf, &len));
+	shell_history_reset(&tsh.history);
+
+	shell_history_purge(&tsh);
+	TEST_ASSERT_FALSE(shell_history_get(&tsh.history, true, buf, &len));
+
+	/* Still usable afterwards */
+	feed("later\r");
+	TEST_ASSERT_TRUE(shell_history_get(&tsh.history, true, buf, &len));
+	TEST_ASSERT_EQUAL_STRING("later", buf);
+	harness_teardown();
+}
+#endif
+
+/* ----------------------------------------------------------------
  * Test group runner
  * ---------------------------------------------------------------- */
 
@@ -373,4 +594,22 @@ void test_shell_group(void)
 	RUN_TEST(test_shell_backspace);
 	RUN_TEST(test_shell_dispatch_subcmd);
 	RUN_TEST(test_shell_dispatch_unknown);
+
+	/* Login primitives (#59) */
+	RUN_TEST(test_shell_obscure_set_returns_previous);
+	RUN_TEST(test_shell_obscure_insert_delete);
+	RUN_TEST(test_shell_obscure_default_off);
+	RUN_TEST(test_shell_set_root_cmd_valid_invalid);
+	RUN_TEST(test_shell_root_dispatch_beneath);
+	RUN_TEST(test_shell_root_rejects_other_roots);
+	RUN_TEST(test_shell_root_clear_restores_tree);
+#ifdef CONFIG_ZSHELL_TAB_COMPLETION
+	RUN_TEST(test_shell_root_completion);
+#endif
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	RUN_TEST(test_shell_prompt_change);
+#endif
+#ifdef CONFIG_ZSHELL_HISTORY
+	RUN_TEST(test_shell_history_purge);
+#endif
 }
