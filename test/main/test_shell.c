@@ -3,7 +3,7 @@
  * Copyright 2026 Intercreate
  *
  * Unit tests for shell parsing, command registration, history,
- * and tab completion logic.
+ * line editing and dispatch (via a capture transport, no shell thread).
  */
 
 #include <string.h>
@@ -203,6 +203,149 @@ static void test_shell_history_empty(void)
 #endif /* CONFIG_ZSHELL_HISTORY */
 
 /* ----------------------------------------------------------------
+ * Line-editing harness: capture transport, no shell thread
+ * ---------------------------------------------------------------- */
+
+static char cap_buf[1024];
+static size_t cap_len;
+
+static int cap_write(const struct shell_transport *transport, const void *data, size_t length,
+		     size_t *cnt)
+{
+	(void)transport;
+	size_t room = sizeof(cap_buf) - 1 - cap_len;
+	size_t n = length < room ? length : room;
+
+	memcpy(&cap_buf[cap_len], data, n);
+	cap_len += n;
+	cap_buf[cap_len] = '\0';
+	*cnt = length;
+	return 0;
+}
+
+static const struct shell_transport_api cap_api = {.write = cap_write};
+static const struct shell_transport cap_transport = {.api = &cap_api};
+
+static struct shell tsh;
+
+/* Last dispatch seen by tcmd_handler */
+static size_t seen_argc;
+static char seen_argv[CONFIG_ZSHELL_MAX_ARGC][32];
+
+static int tcmd_handler(const struct shell *sh, size_t argc, char **argv)
+{
+	(void)sh;
+	seen_argc = argc;
+	for (size_t i = 0; i < argc && i < CONFIG_ZSHELL_MAX_ARGC; i++) {
+		strncpy(seen_argv[i], argv[i], sizeof(seen_argv[i]) - 1);
+		seen_argv[i][sizeof(seen_argv[i]) - 1] = '\0';
+	}
+	return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(tcmd_subcmds, SHELL_CMD(get, NULL, "get", tcmd_handler)
+						     SHELL_CMD(set, NULL, "set", tcmd_handler));
+
+static struct shell_static_entry tcmd = {
+	.syntax = "tcmd",
+	.help = "test command",
+	.subcmd = &tcmd_subcmds,
+	.handler = tcmd_handler,
+};
+
+static struct shell_static_entry other = {
+	.syntax = "other",
+	.help = "other command",
+	.handler = tcmd_handler,
+};
+
+static size_t saved_root_count;
+static struct shell_static_entry *saved_root[CONFIG_ZSHELL_MAX_ROOT_CMDS];
+
+static void cap_clear(void)
+{
+	cap_len = 0;
+	cap_buf[0] = '\0';
+}
+
+/* Fresh shell with a capture transport and a root tree of {other, tcmd} */
+static void harness_setup(void)
+{
+	saved_root_count = _shell_root_cmd_count;
+	memcpy(saved_root, _shell_root_cmds, saved_root_count * sizeof(saved_root[0]));
+	_shell_root_cmd_count = 0;
+	shell_cmd_register(&other);
+	shell_cmd_register(&tcmd);
+
+	memset(&tsh, 0, sizeof(tsh));
+	tsh.iface = &cap_transport;
+	tsh.default_prompt = "t> ";
+	k_mutex_init(&tsh.ctx.wr_mtx);
+	tsh.ctx.echo = true;
+	tsh.ctx.state = SHELL_STATE_ACTIVE;
+#ifdef CONFIG_ZSHELL_HISTORY
+	shell_history_init(&tsh.history);
+#endif
+	seen_argc = 0;
+	cap_clear();
+}
+
+static void harness_teardown(void)
+{
+	_shell_root_cmd_count = saved_root_count;
+	memcpy(_shell_root_cmds, saved_root, saved_root_count * sizeof(saved_root[0]));
+}
+
+static void feed(const char *s)
+{
+	while (*s != '\0') {
+		shell_process_char(&tsh, *s++);
+	}
+}
+
+static void test_shell_insert_echo(void)
+{
+	harness_setup();
+	feed("ab");
+	TEST_ASSERT_EQUAL_STRING("ab", cap_buf);
+	TEST_ASSERT_EQUAL(2, tsh.ctx.cmd_buff_len);
+	TEST_ASSERT_EQUAL(2, tsh.ctx.cmd_buff_pos);
+	TEST_ASSERT_EQUAL_MEMORY("ab", tsh.ctx.cmd_buff, 2);
+	harness_teardown();
+}
+
+static void test_shell_backspace(void)
+{
+	harness_setup();
+	feed("abc\b");
+	TEST_ASSERT_EQUAL_STRING("abc\b \b", cap_buf);
+	TEST_ASSERT_EQUAL(2, tsh.ctx.cmd_buff_len);
+	TEST_ASSERT_EQUAL_MEMORY("ab", tsh.ctx.cmd_buff, 2);
+	harness_teardown();
+}
+
+static void test_shell_dispatch_subcmd(void)
+{
+	harness_setup();
+	feed("tcmd set 5\r");
+	TEST_ASSERT_EQUAL(2, seen_argc);
+	TEST_ASSERT_EQUAL_STRING("set", seen_argv[0]);
+	TEST_ASSERT_EQUAL_STRING("5", seen_argv[1]);
+	/* Prompt reprinted after execution */
+	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "\r\nt> "));
+	harness_teardown();
+}
+
+static void test_shell_dispatch_unknown(void)
+{
+	harness_setup();
+	feed("nope\r");
+	TEST_ASSERT_EQUAL(0, seen_argc);
+	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "Unknown command: nope"));
+	harness_teardown();
+}
+
+/* ----------------------------------------------------------------
  * Test group runner
  * ---------------------------------------------------------------- */
 
@@ -224,4 +367,10 @@ void test_shell_group(void)
 	RUN_TEST(test_shell_history_skip_duplicate);
 	RUN_TEST(test_shell_history_empty);
 #endif
+
+	/* Line editing + dispatch */
+	RUN_TEST(test_shell_insert_echo);
+	RUN_TEST(test_shell_backspace);
+	RUN_TEST(test_shell_dispatch_subcmd);
+	RUN_TEST(test_shell_dispatch_unknown);
 }
