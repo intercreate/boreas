@@ -25,13 +25,22 @@
 void shell_completion(struct shell *sh)
 {
 	char line_copy[CONFIG_ZSHELL_CMD_BUFF_SIZE];
-	char *argv[CONFIG_ZSHELL_MAX_ARGC];
+	char *argv[CONFIG_ZSHELL_MAX_ARGC + 1];
+	const struct shell_static_entry *root = shell_root_cmd_get();
+	size_t argc;
 
 	/* Copy buffer up to cursor position */
 	memcpy(line_copy, sh->ctx.cmd_buff, sh->ctx.cmd_buff_pos);
 	line_copy[sh->ctx.cmd_buff_pos] = '\0';
 
-	size_t argc = shell_make_argv(line_copy, argv, CONFIG_ZSHELL_MAX_ARGC);
+	/* A selected root sits at argv[0], as in shell_execute(); the typed
+	 * tokens then only ever walk beneath it. */
+	if (root != NULL) {
+		argv[0] = (char *)root->syntax;
+		argc = 1 + shell_make_argv(line_copy, &argv[1], CONFIG_ZSHELL_MAX_ARGC);
+	} else {
+		argc = shell_make_argv(line_copy, argv, CONFIG_ZSHELL_MAX_ARGC);
+	}
 
 	/* Determine if we're completing a partial token or starting a new one */
 	bool completing_partial =
@@ -52,15 +61,7 @@ void shell_completion(struct shell *sh)
 		candidate_count = _shell_root_cmd_count;
 	} else {
 		/* Walk tree to find parent */
-		const struct shell_static_entry *cmd = NULL;
-
-		/* Find root command */
-		for (size_t i = 0; i < _shell_root_cmd_count; i++) {
-			if (strcmp(_shell_root_cmds[i]->syntax, argv[0]) == 0) {
-				cmd = _shell_root_cmds[i];
-				break;
-			}
-		}
+		const struct shell_static_entry *cmd = shell_root_cmd_find(argv[0]);
 
 		/* Walk subcommands */
 		for (size_t d = 1; d < walk_depth && cmd != NULL; d++) {

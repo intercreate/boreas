@@ -41,6 +41,43 @@ menu "Boreas Shell (zshell)"
         default "boreas> "
         depends on ZSHELL
 
+    config ZSHELL_PROMPT_CHANGE
+        bool "Allow prompt change at runtime"
+        default y
+        depends on ZSHELL
+        help
+            Enable shell_prompt_change(). Adds a ZSHELL_PROMPT_BUFF_SIZE
+            byte prompt buffer to each shell instance.
+            Mirrors CONFIG_SHELL_PROMPT_CHANGE.
+
+    config ZSHELL_PROMPT_BUFF_SIZE
+        int "Prompt buffer size"
+        range 2 40
+        default 20
+        depends on ZSHELL_PROMPT_CHANGE
+        help
+            Mirrors CONFIG_SHELL_PROMPT_BUFF_SIZE. Prompts of this length or
+            longer (including NUL) are rejected with -EINVAL.
+
+    config ZSHELL_START_OBSCURED
+        bool "Display asterisk when echoing"
+        default n
+        depends on ZSHELL
+        help
+            Echo '*' instead of the typed character. Used for login prompts;
+            toggle at runtime with shell_obscure_set().
+            Mirrors CONFIG_SHELL_START_OBSCURED.
+
+    config ZSHELL_CMD_ROOT
+        string "Root command at init"
+        default ""
+        depends on ZSHELL
+        help
+            Restrict dispatch to this root command when the shell starts:
+            typed input becomes its arguments and no other root command is
+            reachable. Empty means the full command tree. Change at runtime
+            with shell_set_root_cmd(). Mirrors CONFIG_SHELL_CMD_ROOT.
+
     config ZSHELL_HISTORY
         bool "Enable command history"
         default y

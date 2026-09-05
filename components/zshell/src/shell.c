@@ -9,6 +9,7 @@
 
 #include "zshell/shell.h"
 
+#include <errno.h>
 #include <string.h>
 
 #include "zsys/log.h"
@@ -21,14 +22,65 @@ LOG_MODULE_REGISTER(shell, LOG_LEVEL_INF);
 
 void shell_print_prompt(const struct shell *sh)
 {
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	const char *prompt = sh->ctx.prompt;
+#else
 	const char *prompt = sh->default_prompt ? sh->default_prompt : CONFIG_ZSHELL_PROMPT;
+#endif
 
 	shell_write(sh, prompt, strlen(prompt));
 }
 
+int shell_prompt_change(const struct shell *sh, const char *prompt)
+{
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	struct shell_ctx *ctx = (struct shell_ctx *)&sh->ctx;
+
+	if (prompt == NULL || strlen(prompt) >= CONFIG_ZSHELL_PROMPT_BUFF_SIZE) {
+		return -EINVAL;
+	}
+	strcpy(ctx->prompt, prompt);
+	return 0;
+#else
+	(void)sh;
+	(void)prompt;
+	return -EPERM;
+#endif
+}
+
 void shell_write_cmd(const struct shell *sh, uint16_t off, uint16_t len)
 {
+	if (sh->ctx.obscure) {
+		for (uint16_t i = 0; i < len; i++) {
+			shell_write(sh, "*", 1);
+		}
+		return;
+	}
 	shell_write(sh, &sh->ctx.cmd_buff[off], len);
+}
+
+void shell_history_purge(const struct shell *sh)
+{
+#ifdef CONFIG_ZSHELL_HISTORY
+	/* history is embedded in the (logically const) shell; see shell.h */
+	shell_history_init((struct shell_history *)&sh->history);
+#else
+	(void)sh;
+#endif
+}
+
+int shell_obscure_set(const struct shell *sh, bool obscure)
+{
+	struct shell_ctx *ctx;
+	bool prev;
+
+	if (sh == NULL) {
+		return -EINVAL;
+	}
+	ctx = (struct shell_ctx *)&sh->ctx;
+	prev = ctx->obscure;
+	ctx->obscure = obscure;
+	return prev;
 }
 
 void shell_process_char(struct shell *sh, char ch)
@@ -266,6 +318,13 @@ int shell_init(struct shell *sh, const struct shell_transport *transport, const 
 #else
 	sh->ctx.echo = false;
 #endif
+#ifdef CONFIG_ZSHELL_START_OBSCURED
+	sh->ctx.obscure = true;
+#endif
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	/* Truncates a too-long default like upstream's strncpy into ctx->prompt */
+	strncpy(sh->ctx.prompt, sh->default_prompt, CONFIG_ZSHELL_PROMPT_BUFF_SIZE - 1);
+#endif
 
 	sh->ctx.state = SHELL_STATE_INITIALIZED;
 
@@ -285,6 +344,11 @@ int shell_init(struct shell *sh, const struct shell_transport *transport, const 
 #endif
 	shell_builtins_register();
 	shell_cmd_sort_root();
+
+	if (CONFIG_ZSHELL_CMD_ROOT[0] != '\0' && shell_set_root_cmd(CONFIG_ZSHELL_CMD_ROOT) != 0) {
+		LOG_WRN("CONFIG_ZSHELL_CMD_ROOT '%s' is not a root command; using full tree",
+			CONFIG_ZSHELL_CMD_ROOT);
+	}
 
 #ifdef CONFIG_ZSHELL_HISTORY
 	shell_history_init(&sh->history);

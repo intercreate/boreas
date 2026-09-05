@@ -57,6 +57,14 @@ extern "C" {
 #define CONFIG_ZSHELL_PROMPT "boreas> "
 #endif
 
+#ifndef CONFIG_ZSHELL_PROMPT_BUFF_SIZE
+#define CONFIG_ZSHELL_PROMPT_BUFF_SIZE 20
+#endif
+
+#ifndef CONFIG_ZSHELL_CMD_ROOT
+#define CONFIG_ZSHELL_CMD_ROOT ""
+#endif
+
 /* ----------------------------------------------------------------
  * History
  * ---------------------------------------------------------------- */
@@ -88,6 +96,10 @@ struct shell_ctx {
 	struct k_mutex wr_mtx; /* thread-safe output */
 	int ret_val;           /* last command return value */
 	bool echo;             /* echo characters back */
+	bool obscure;          /* echo '*' instead of the typed character */
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	char prompt[CONFIG_ZSHELL_PROMPT_BUFF_SIZE];
+#endif
 
 	/* VT100 escape sequence decoder */
 	uint8_t esc_state; /* 0=normal, 1=got ESC, 2=got CSI */
@@ -124,6 +136,9 @@ extern struct shell_static_entry *_shell_root_cmds[];
 extern size_t _shell_root_cmd_count;
 
 void shell_cmd_register(struct shell_static_entry *entry);
+const struct shell_static_entry *shell_root_cmd_find(const char *name);
+/* Selected root (shell_set_root_cmd), or NULL for the full tree */
+const struct shell_static_entry *shell_root_cmd_get(void);
 
 /**
  * Register a root-level command.
@@ -204,6 +219,39 @@ void shell_info(const struct shell *sh, const char *fmt, ...) __attribute__((for
  * Write raw data to the shell transport (mutex-protected).
  */
 void shell_write(const struct shell *sh, const void *data, size_t len);
+
+/**
+ * Obscure typed characters (echo '*'), e.g. while reading a password.
+ *
+ * @return Previous obscure state (0 or 1), -EINVAL if @p sh is NULL.
+ */
+int shell_obscure_set(const struct shell *sh, bool obscure);
+
+/**
+ * Change the prompt at runtime. Requires CONFIG_ZSHELL_PROMPT_CHANGE.
+ *
+ * @return 0 on success, -EINVAL if @p prompt is NULL or does not fit in
+ *         CONFIG_ZSHELL_PROMPT_BUFF_SIZE, -EPERM if the option is disabled.
+ */
+int shell_prompt_change(const struct shell *sh, const char *prompt);
+
+/**
+ * Restrict dispatch to one root command. Typed input is passed as arguments
+ * beneath @p cmd; help and tab completion see only its subcommands. Applies
+ * to every shell instance, as upstream. NULL restores the full tree.
+ *
+ * @return 0 on success, -EINVAL if @p cmd names no root command.
+ */
+int shell_set_root_cmd(const char *cmd);
+
+/**
+ * Drop all history entries, e.g. after a login command consumed a password.
+ *
+ * Upstream's sample calls z_shell_history_purge(sh->history); Boreas embeds
+ * the history in struct shell rather than pointing at it, so this takes the
+ * shell. No-op without CONFIG_ZSHELL_HISTORY.
+ */
+void shell_history_purge(const struct shell *sh);
 
 /* ----------------------------------------------------------------
  * Internal API (used by shell subsystem files)
