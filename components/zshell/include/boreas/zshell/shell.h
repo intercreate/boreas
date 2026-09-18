@@ -217,6 +217,9 @@ void shell_write(const struct shell *sh, const void *data, size_t len);
  * Obscure typed characters (echo '*'), e.g. while reading a password.
  *
  * @return Previous obscure state (0 or 1), -EINVAL if @p sh is NULL.
+ *
+ * @note Upstream sets the flag atomically; Boreas writes a plain bool. Call
+ *       it from the shell thread (a command handler), as the login sample does.
  */
 int shell_obscure_set(const struct shell *sh, bool obscure);
 
@@ -229,7 +232,8 @@ int shell_obscure_set(const struct shell *sh, bool obscure);
  *         CONFIG_ZSHELL_PROMPT_BUFF_SIZE, -EPERM if the option is disabled.
  *
  * @note Upstream trylocks the output mutex and returns -EBUSY; Boreas blocks
- *       on it instead, so -EBUSY is never returned.
+ *       on it instead, so -EBUSY is never returned. The prompt is read outside
+ *       the lock when it is printed, so call this from the shell thread.
  */
 int shell_prompt_change(const struct shell *sh, const char *prompt);
 

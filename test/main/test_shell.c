@@ -280,7 +280,7 @@ static void cap_clear(void)
 	cap_buf[0] = '\0';
 }
 
-/* Fresh shell with a capture transport and a root tree of {other, tcmd} */
+/* Fresh shell with a capture transport and a root tree of {other, tcmd} + builtins */
 static void harness_setup(void)
 {
 	saved_root_count = _shell_root_cmd_count;
@@ -288,6 +288,7 @@ static void harness_setup(void)
 	_shell_root_cmd_count = 0;
 	shell_cmd_register(&other);
 	shell_cmd_register(&tcmd);
+	shell_builtins_register(); /* help must be present for the gating tests */
 
 	memset(&tsh, 0, sizeof(tsh));
 	tsh.iface = &cap_transport;
@@ -468,9 +469,18 @@ static void test_shell_root_rejects_other_roots(void)
 	TEST_ASSERT_EQUAL(0, other_hits);
 	TEST_ASSERT_EQUAL_STRING("other", seen_argv[1]);
 
-	/* help is itself a root command, so it is unreachable too */
+	/* help is itself a root command, so it is unreachable too: it lands on
+	 * the root handler as an argument instead of listing the tree */
 	feed("help\r");
+	TEST_ASSERT_EQUAL_STRING("help", seen_argv[1]);
+	TEST_ASSERT_NULL(strstr(cap_buf, "Available commands"));
 	TEST_ASSERT_NULL(strstr(cap_buf, "other command"));
+
+	/* Positive control: with the tree restored, help does list it */
+	shell_set_root_cmd(NULL);
+	cap_clear();
+	feed("help\r");
+	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "other command"));
 	harness_teardown();
 }
 

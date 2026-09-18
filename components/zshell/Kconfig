@@ -61,7 +61,6 @@ menu "Boreas Shell (zshell)"
 
     config ZSHELL_START_OBSCURED
         bool "Display asterisk when echoing"
-        default n
         depends on ZSHELL
         help
             Echo '*' instead of the typed character. Used for login prompts;
