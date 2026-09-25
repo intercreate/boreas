@@ -48,8 +48,9 @@ idf.py -p /dev/cu.usbmodemXXXX flash monitor
 
 ## Login / Logout
 
-Start the demo locked so that only `login <password>` is reachable, echo shows
-`*`, and the prompt reads `login: `:
+Start the demo locked: `login` is the selected root command, so the prompt
+reads `login: `, echo shows `*`, and the typed line is passed to `login` as its
+argument. Enter just the password (`boreas`), not `login boreas`:
 
 ```bash
 idf.py -DLOGIN=y build      # rm sdkconfig first if switching an existing build

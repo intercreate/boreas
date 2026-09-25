@@ -229,6 +229,12 @@ static const struct shell_transport cap_transport = {.api = &cap_api};
 
 static struct shell tsh;
 
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+/* The harness prompt "t> " and the "login: " test both have to fit */
+BUILD_ASSERT(CONFIG_ZSHELL_PROMPT_BUFF_SIZE >= sizeof("login: "),
+	     "shell tests assume CONFIG_ZSHELL_PROMPT_BUFF_SIZE >= 8");
+#endif
+
 /* Last dispatch seen by tcmd_handler */
 static size_t seen_argc;
 static char seen_argv[CONFIG_ZSHELL_MAX_ARGC][32];
@@ -404,7 +410,11 @@ static void test_shell_obscure_insert_delete(void)
 
 	/* Dispatch still sees the real text */
 	feed("\r");
+#ifdef CONFIG_ZSHELL_VT100
 	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "Unknown command: za"));
+#else
+	TEST_ASSERT_NOT_NULL(strstr(cap_buf, "Unknown command: a"));
+#endif
 	harness_teardown();
 }
 
