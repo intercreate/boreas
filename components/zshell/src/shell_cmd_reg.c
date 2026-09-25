@@ -10,16 +10,49 @@
 
 #include "zshell/shell.h"
 
+#include <errno.h>
 #include <string.h>
 
 struct shell_static_entry *_shell_root_cmds[CONFIG_ZSHELL_MAX_ROOT_CMDS];
 size_t _shell_root_cmd_count = 0;
+
+/* One selection for every shell instance, matching shell_set_root_cmd() upstream */
+static const struct shell_static_entry *selected_root;
 
 void shell_cmd_register(struct shell_static_entry *entry)
 {
 	if (_shell_root_cmd_count < CONFIG_ZSHELL_MAX_ROOT_CMDS) {
 		_shell_root_cmds[_shell_root_cmd_count++] = entry;
 	}
+}
+
+const struct shell_static_entry *shell_root_cmd_find(const char *name)
+{
+	for (size_t i = 0; i < _shell_root_cmd_count; i++) {
+		if (strcmp(_shell_root_cmds[i]->syntax, name) == 0) {
+			return _shell_root_cmds[i];
+		}
+	}
+	return NULL;
+}
+
+const struct shell_static_entry *shell_root_cmd_get(void)
+{
+	return selected_root;
+}
+
+int shell_set_root_cmd(const char *cmd)
+{
+	const struct shell_static_entry *entry = NULL;
+
+	if (cmd != NULL) {
+		entry = shell_root_cmd_find(cmd);
+		if (entry == NULL) {
+			return -EINVAL;
+		}
+	}
+	selected_root = entry;
+	return 0;
 }
 
 /* Insertion sort by syntax name (alphabetical) -- runs once at init */

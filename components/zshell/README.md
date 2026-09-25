@@ -94,6 +94,21 @@ shell_write(sh, raw_data, len);
 | Ctrl-C | Cancel line |
 | Ctrl-L | Clear screen |
 
+## Login flows
+
+The shell does not own passwords or policy. It provides the same primitives
+Zephyr's login sample composes:
+
+| API | Effect |
+|-----|--------|
+| `shell_obscure_set(sh, bool)` | Echo `*` instead of the typed character; returns the previous state |
+| `shell_set_root_cmd("login")` | Only `login` is reachable; typed text becomes its arguments. `NULL` restores the tree |
+| `shell_prompt_change(sh, "login: ")` | Runtime prompt (`CONFIG_ZSHELL_PROMPT_CHANGE`) |
+| `shell_history_purge(sh)` | Drop the history entry holding the password |
+
+`examples/shell_demo` has a working `login`/`logout` pair; build it with
+`idf.py -DLOGIN=y build` to start locked.
+
 ## Transport abstraction
 
 The shell is transport-agnostic. `shell_transport_stdio` is the default (VFS stdio). Custom transports implement:
@@ -158,6 +173,11 @@ Sanity checks if keys aren't reaching the shell:
 | `CONFIG_ZSHELL_PRINTF_BUFF_SIZE` | 256 | Output format buffer |
 | `CONFIG_ZSHELL_MAX_ROOT_CMDS` | 32 | Max root commands |
 | `CONFIG_ZSHELL_MAX_ARGC` | 12 | Max arguments per command |
+| `CONFIG_ZSHELL_PROMPT` | `"boreas> "` | Default prompt |
+| `CONFIG_ZSHELL_PROMPT_CHANGE` | y | `shell_prompt_change()` at runtime |
+| `CONFIG_ZSHELL_PROMPT_BUFF_SIZE` | 20 | Runtime prompt buffer (2..40) |
+| `CONFIG_ZSHELL_START_OBSCURED` | n | Echo `*` from startup; see `shell_obscure_set()` |
+| `CONFIG_ZSHELL_CMD_ROOT` | `""` | Root command selected at startup; see `shell_set_root_cmd()` |
 | `CONFIG_ZSHELL_THREAD_STACK_SIZE` | 4096 | Shell thread stack |
 | `CONFIG_ZSHELL_THREAD_PRIORITY` | 5 | Shell thread priority |
 | `CONFIG_ZSHELL_HISTORY` | y | Command history |

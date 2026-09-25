@@ -16,6 +16,8 @@ Demonstrates the Boreas shell (`zshell`) with hierarchical commands, tab complet
 | `thread` | Print thread stack and CPU usage statistics |
 | `app status` | Custom demo command: show app status |
 | `app version` | Custom demo command: show version |
+| `login <password>` | Unlock the shell (see below) |
+| `logout` | Lock the shell again |
 
 ## Key Bindings
 
@@ -43,6 +45,24 @@ idf.py set-target esp32s3
 idf.py build
 idf.py -p /dev/cu.usbmodemXXXX flash monitor
 ```
+
+## Login / Logout
+
+Start the demo locked: `login` is the selected root command, so the prompt
+reads `login: `, echo shows `*`, and the typed line is passed to `login` as its
+argument. Enter just the password (`boreas`), not `login boreas`:
+
+```bash
+idf.py -DLOGIN=y build      # rm sdkconfig first if switching an existing build
+```
+
+The default password is `boreas`. `login` purges the history entry holding the
+password, turns obscuring off, restores the full command tree and the normal
+prompt. `logout` reverses that. The composition mirrors Zephyr's
+`samples/subsys/shell/shell_module` login sample; the shell provides the
+primitives (`shell_obscure_set()`, `shell_set_root_cmd()`,
+`shell_prompt_change()`, `shell_history_purge()`) and the application owns
+the credential check.
 
 ## Adding Custom Commands
 

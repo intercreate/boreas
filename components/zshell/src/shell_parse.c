@@ -55,17 +55,15 @@ size_t shell_make_argv(char *line, char **argv, size_t max_argc)
 	return argc;
 }
 
-/**
- * Find a root command by name.
- */
-static const struct shell_static_entry *find_root_cmd(const char *name)
+size_t shell_make_argv_root(char *line, char **argv)
 {
-	for (size_t i = 0; i < _shell_root_cmd_count; i++) {
-		if (strcmp(_shell_root_cmds[i]->syntax, name) == 0) {
-			return _shell_root_cmds[i];
-		}
+	const struct shell_static_entry *root = shell_root_cmd_get();
+
+	if (root == NULL) {
+		return shell_make_argv(line, argv, CONFIG_ZSHELL_MAX_ARGC);
 	}
-	return NULL;
+	argv[0] = (char *)root->syntax;
+	return 1 + shell_make_argv(line, &argv[1], CONFIG_ZSHELL_MAX_ARGC);
 }
 
 /**
@@ -93,23 +91,26 @@ static const struct shell_static_entry *find_subcmd(const union shell_cmd_entry 
  */
 int shell_execute(struct shell *sh)
 {
-	char *argv[CONFIG_ZSHELL_MAX_ARGC];
+	/* +1: a selected root command occupies argv[0] ahead of the typed tokens */
+	char *argv[CONFIG_ZSHELL_MAX_ARGC + 1];
 	char line_copy[CONFIG_ZSHELL_CMD_BUFF_SIZE];
+	const struct shell_static_entry *cmd = shell_root_cmd_get();
+	size_t argc;
 
 	/* Copy buffer since make_argv modifies it */
 	memcpy(line_copy, sh->ctx.cmd_buff, sh->ctx.cmd_buff_len);
 	line_copy[sh->ctx.cmd_buff_len] = '\0';
 
-	size_t argc = shell_make_argv(line_copy, argv, CONFIG_ZSHELL_MAX_ARGC);
-	if (argc == 0) {
+	argc = shell_make_argv_root(line_copy, argv);
+	if (argc == (cmd != NULL ? 1 : 0)) {
 		return 0; /* empty line */
 	}
-
-	/* Walk the command tree */
-	const struct shell_static_entry *cmd = find_root_cmd(argv[0]);
 	if (cmd == NULL) {
-		shell_error(sh, "Unknown command: %s", argv[0]);
-		return -1;
+		cmd = shell_root_cmd_find(argv[0]);
+		if (cmd == NULL) {
+			shell_error(sh, "Unknown command: %s", argv[0]);
+			return -1;
+		}
 	}
 
 	/* Walk subcommands as deep as we can */

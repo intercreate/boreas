@@ -9,6 +9,7 @@
 
 #include "zshell/shell.h"
 
+#include <errno.h>
 #include <string.h>
 
 #include "zsys/log.h"
@@ -19,13 +20,73 @@ LOG_MODULE_REGISTER(shell, LOG_LEVEL_INF);
  * Character Processing
  * ---------------------------------------------------------------- */
 
-static void shell_print_prompt(struct shell *sh)
+void shell_print_prompt(const struct shell *sh)
 {
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	const char *prompt = sh->ctx.prompt;
+#else
 	const char *prompt = sh->default_prompt ? sh->default_prompt : CONFIG_ZSHELL_PROMPT;
+#endif
+
 	shell_write(sh, prompt, strlen(prompt));
 }
 
-static void shell_process_char(struct shell *sh, char ch)
+int shell_prompt_change(const struct shell *sh, const char *prompt)
+{
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	struct shell_ctx *ctx = (struct shell_ctx *)&sh->ctx;
+
+	if (prompt == NULL || strlen(prompt) >= CONFIG_ZSHELL_PROMPT_BUFF_SIZE) {
+		return -EINVAL;
+	}
+	/* Never interleave with an in-progress write; see @note on the declaration */
+	k_mutex_lock(&ctx->wr_mtx, K_FOREVER);
+	strcpy(ctx->prompt, prompt);
+	k_mutex_unlock(&ctx->wr_mtx);
+	return 0;
+#else
+	(void)sh;
+	(void)prompt;
+	return -EPERM;
+#endif
+}
+
+void shell_write_cmd(const struct shell *sh, uint16_t off, uint16_t len)
+{
+	if (sh->ctx.obscure) {
+		for (uint16_t i = 0; i < len; i++) {
+			shell_write(sh, "*", 1);
+		}
+		return;
+	}
+	shell_write(sh, &sh->ctx.cmd_buff[off], len);
+}
+
+void shell_history_purge(const struct shell *sh)
+{
+#ifdef CONFIG_ZSHELL_HISTORY
+	/* history is embedded in the (logically const) shell; see shell.h */
+	shell_history_init((struct shell_history *)&sh->history);
+#else
+	(void)sh;
+#endif
+}
+
+int shell_obscure_set(const struct shell *sh, bool obscure)
+{
+	struct shell_ctx *ctx;
+	bool prev;
+
+	if (sh == NULL) {
+		return -EINVAL;
+	}
+	ctx = (struct shell_ctx *)&sh->ctx;
+	prev = ctx->obscure;
+	ctx->obscure = obscure;
+	return prev;
+}
+
+void shell_process_char(struct shell *sh, char ch)
 {
 	/* VT100 escape sequence handling */
 #ifdef CONFIG_ZSHELL_VT100
@@ -74,8 +135,8 @@ static void shell_process_char(struct shell *sh, char ch)
 			/* Erase on terminal: backspace, rewrite rest, clear trailing */
 			shell_write(sh, "\b", 1);
 			if (sh->ctx.cmd_buff_pos < sh->ctx.cmd_buff_len) {
-				shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
-					    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+				shell_write_cmd(sh, sh->ctx.cmd_buff_pos,
+						sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
 				shell_write(sh, " \b", 2);
 				/* Move cursor back */
 				uint16_t move = sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos;
@@ -104,8 +165,8 @@ static void shell_process_char(struct shell *sh, char ch)
 
 	case 0x05: /* Ctrl-E: move cursor to end */
 		if (sh->ctx.cmd_buff_pos < sh->ctx.cmd_buff_len) {
-			shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
-				    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos,
+					sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
 			sh->ctx.cmd_buff_pos = sh->ctx.cmd_buff_len;
 		}
 		break;
@@ -146,8 +207,8 @@ static void shell_process_char(struct shell *sh, char ch)
 			for (uint16_t i = 0; i < removed; i++) {
 				shell_write(sh, "\b", 1);
 			}
-			shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos],
-				    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos,
+					sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos);
 			for (uint16_t i = 0; i < removed; i++) {
 				shell_write(sh, " ", 1);
 			}
@@ -163,7 +224,7 @@ static void shell_process_char(struct shell *sh, char ch)
 		shell_print_prompt(sh);
 		/* Reprint current line */
 		if (sh->ctx.cmd_buff_len > 0) {
-			shell_write(sh, sh->ctx.cmd_buff, sh->ctx.cmd_buff_len);
+			shell_write_cmd(sh, 0, sh->ctx.cmd_buff_len);
 		}
 		break;
 
@@ -191,8 +252,8 @@ static void shell_process_char(struct shell *sh, char ch)
 
 			if (sh->ctx.echo) {
 				/* Write from cursor to end, then move cursor back */
-				shell_write(sh, &sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos - 1],
-					    sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos + 1);
+				shell_write_cmd(sh, sh->ctx.cmd_buff_pos - 1,
+						sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos + 1);
 				uint16_t move = sh->ctx.cmd_buff_len - sh->ctx.cmd_buff_pos;
 				for (uint16_t i = 0; i < move; i++) {
 					shell_write(sh, "\b", 1);
@@ -247,6 +308,8 @@ static void shell_thread_entry(void *p1, void *p2, void *p3)
 
 int shell_init(struct shell *sh, const struct shell_transport *transport, const char *prompt)
 {
+	static bool root_applied;
+
 	memset(&sh->ctx, 0, sizeof(sh->ctx));
 
 	sh->iface = transport;
@@ -259,6 +322,13 @@ int shell_init(struct shell *sh, const struct shell_transport *transport, const 
 	sh->ctx.echo = true;
 #else
 	sh->ctx.echo = false;
+#endif
+#ifdef CONFIG_ZSHELL_START_OBSCURED
+	sh->ctx.obscure = true;
+#endif
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	/* Truncates a too-long default like upstream's strncpy into ctx->prompt */
+	strncpy(sh->ctx.prompt, sh->default_prompt, CONFIG_ZSHELL_PROMPT_BUFF_SIZE - 1);
 #endif
 
 	sh->ctx.state = SHELL_STATE_INITIALIZED;
@@ -279,6 +349,17 @@ int shell_init(struct shell *sh, const struct shell_transport *transport, const 
 #endif
 	shell_builtins_register();
 	shell_cmd_sort_root();
+
+	/* The selection is shared by all instances, so apply the Kconfig root
+	 * once: a second shell_init() after a login must not relock the first. */
+	if (CONFIG_ZSHELL_CMD_ROOT[0] != '\0' && !root_applied) {
+		root_applied = true;
+		if (shell_set_root_cmd(CONFIG_ZSHELL_CMD_ROOT) != 0) {
+			LOG_WRN("CONFIG_ZSHELL_CMD_ROOT '%s' is not a root command; using full "
+				"tree",
+				CONFIG_ZSHELL_CMD_ROOT);
+		}
+	}
 
 #ifdef CONFIG_ZSHELL_HISTORY
 	shell_history_init(&sh->history);

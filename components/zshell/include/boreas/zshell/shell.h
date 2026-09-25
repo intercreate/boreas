@@ -57,6 +57,10 @@ extern "C" {
 #define CONFIG_ZSHELL_PROMPT "boreas> "
 #endif
 
+#ifndef CONFIG_ZSHELL_CMD_ROOT
+#define CONFIG_ZSHELL_CMD_ROOT ""
+#endif
+
 /* ----------------------------------------------------------------
  * History
  * ---------------------------------------------------------------- */
@@ -88,6 +92,10 @@ struct shell_ctx {
 	struct k_mutex wr_mtx; /* thread-safe output */
 	int ret_val;           /* last command return value */
 	bool echo;             /* echo characters back */
+	bool obscure;          /* echo '*' instead of the typed character */
+#ifdef CONFIG_ZSHELL_PROMPT_CHANGE
+	char prompt[CONFIG_ZSHELL_PROMPT_BUFF_SIZE];
+#endif
 
 	/* VT100 escape sequence decoder */
 	uint8_t esc_state; /* 0=normal, 1=got ESC, 2=got CSI */
@@ -205,18 +213,78 @@ void shell_info(const struct shell *sh, const char *fmt, ...) __attribute__((for
  */
 void shell_write(const struct shell *sh, const void *data, size_t len);
 
+/**
+ * Obscure typed characters (echo '*'), e.g. while reading a password.
+ *
+ * @return Previous obscure state (0 or 1), -EINVAL if @p sh is NULL.
+ *
+ * @note Upstream sets the flag atomically; Boreas writes a plain bool. Call
+ *       it from the shell thread (a command handler), as the login sample does.
+ */
+int shell_obscure_set(const struct shell *sh, bool obscure);
+
+/**
+ * Change the prompt at runtime. Requires CONFIG_ZSHELL_PROMPT_CHANGE.
+ *
+ * @param sh     Shell instance.
+ * @param prompt New prompt; an empty string is allowed, as upstream.
+ * @return 0 on success, -EINVAL if @p prompt is NULL or does not fit in
+ *         CONFIG_ZSHELL_PROMPT_BUFF_SIZE, -EPERM if the option is disabled.
+ *
+ * @note Upstream trylocks the output mutex and returns -EBUSY; Boreas blocks
+ *       on it instead, so -EBUSY is never returned. The prompt is read outside
+ *       the lock when it is printed, so call this from the shell thread.
+ */
+int shell_prompt_change(const struct shell *sh, const char *prompt);
+
+/**
+ * Restrict dispatch to one root command. Typed input is passed as arguments
+ * beneath @p cmd, so sibling root commands (including help) are unreachable
+ * and tab completion offers only its subcommands. Applies to every shell
+ * instance, as upstream. NULL restores the full tree.
+ *
+ * @param cmd Root command name, or NULL.
+ * @return 0 on success, -EINVAL if @p cmd names no root command.
+ */
+int shell_set_root_cmd(const char *cmd);
+
+/**
+ * Drop all history entries, e.g. after a login command consumed a password.
+ *
+ * @param sh Shell instance.
+ *
+ * @note Upstream's sample calls z_shell_history_purge(sh->history); Boreas
+ *       embeds the history in struct shell rather than pointing at it, so
+ *       this takes the shell. Call it from a command handler (the shell
+ *       thread); the history is not locked. No-op without
+ *       CONFIG_ZSHELL_HISTORY.
+ */
+void shell_history_purge(const struct shell *sh);
+
 /* ----------------------------------------------------------------
  * Internal API (used by shell subsystem files)
  * ---------------------------------------------------------------- */
 
 /* Command registry */
 void shell_cmd_sort_root(void);
+const struct shell_static_entry *shell_root_cmd_find(const char *name);
+/* Selected root (shell_set_root_cmd), or NULL for the full tree */
+const struct shell_static_entry *shell_root_cmd_get(void);
 void shell_builtins_register(void);
 const struct shell_static_entry *shell_cmd_find(const struct shell_static_entry *cmds, size_t count,
 						const char *name);
 
+/* Line editing */
+void shell_process_char(struct shell *sh, char ch);
+void shell_print_prompt(const struct shell *sh);
+/* Echo len chars of cmd_buff starting at off (the one place the buffer reaches the terminal) */
+void shell_write_cmd(const struct shell *sh, uint16_t off, uint16_t len);
+
 /* Parsing */
 size_t shell_make_argv(char *line, char **argv, size_t max_argc);
+/* shell_make_argv() with the selected root command, if any, placed at argv[0].
+ * argv must hold CONFIG_ZSHELL_MAX_ARGC + 1 entries. */
+size_t shell_make_argv_root(char *line, char **argv);
 int shell_execute(struct shell *sh);
 
 /* History */

@@ -25,13 +25,15 @@
 void shell_completion(struct shell *sh)
 {
 	char line_copy[CONFIG_ZSHELL_CMD_BUFF_SIZE];
-	char *argv[CONFIG_ZSHELL_MAX_ARGC];
+	char *argv[CONFIG_ZSHELL_MAX_ARGC + 1];
+	size_t argc;
 
 	/* Copy buffer up to cursor position */
 	memcpy(line_copy, sh->ctx.cmd_buff, sh->ctx.cmd_buff_pos);
 	line_copy[sh->ctx.cmd_buff_pos] = '\0';
 
-	size_t argc = shell_make_argv(line_copy, argv, CONFIG_ZSHELL_MAX_ARGC);
+	/* A selected root sits at argv[0]; typed tokens only ever walk beneath it */
+	argc = shell_make_argv_root(line_copy, argv);
 
 	/* Determine if we're completing a partial token or starting a new one */
 	bool completing_partial =
@@ -52,15 +54,7 @@ void shell_completion(struct shell *sh)
 		candidate_count = _shell_root_cmd_count;
 	} else {
 		/* Walk tree to find parent */
-		const struct shell_static_entry *cmd = NULL;
-
-		/* Find root command */
-		for (size_t i = 0; i < _shell_root_cmd_count; i++) {
-			if (strcmp(_shell_root_cmds[i]->syntax, argv[0]) == 0) {
-				cmd = _shell_root_cmds[i];
-				break;
-			}
-		}
+		const struct shell_static_entry *cmd = shell_root_cmd_find(argv[0]);
 
 		/* Walk subcommands */
 		for (size_t d = 1; d < walk_depth && cmd != NULL; d++) {
@@ -134,11 +128,11 @@ void shell_completion(struct shell *sh)
 		/* Insert remaining chars */
 		if (sh->ctx.cmd_buff_len + insert_len + 1 < CONFIG_ZSHELL_CMD_BUFF_SIZE) {
 			memcpy(&sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos], insert, insert_len);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos, insert_len);
 			sh->ctx.cmd_buff_pos += insert_len;
 			sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos] = ' ';
 			sh->ctx.cmd_buff_pos++;
 			sh->ctx.cmd_buff_len = sh->ctx.cmd_buff_pos;
-			shell_write(sh, insert, insert_len);
 			shell_write(sh, " ", 1);
 		}
 		return;
@@ -160,9 +154,9 @@ void shell_completion(struct shell *sh)
 		const char *insert = matches[0]->syntax + partial_len;
 		if (sh->ctx.cmd_buff_len + insert_len < CONFIG_ZSHELL_CMD_BUFF_SIZE) {
 			memcpy(&sh->ctx.cmd_buff[sh->ctx.cmd_buff_pos], insert, insert_len);
+			shell_write_cmd(sh, sh->ctx.cmd_buff_pos, insert_len);
 			sh->ctx.cmd_buff_pos += insert_len;
 			sh->ctx.cmd_buff_len = sh->ctx.cmd_buff_pos;
-			shell_write(sh, insert, insert_len);
 		}
 	}
 
@@ -173,7 +167,6 @@ void shell_completion(struct shell *sh)
 	}
 
 	/* Reprint prompt + current line */
-	const char *prompt = sh->default_prompt ? sh->default_prompt : CONFIG_ZSHELL_PROMPT;
-	shell_write(sh, prompt, strlen(prompt));
-	shell_write(sh, sh->ctx.cmd_buff, sh->ctx.cmd_buff_len);
+	shell_print_prompt(sh);
+	shell_write_cmd(sh, 0, sh->ctx.cmd_buff_len);
 }
