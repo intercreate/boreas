@@ -315,3 +315,14 @@ index 0 stays free for ESP-IDF internals. A compile-time `#error` backstops
 the requirement (Kconfig cannot set another component's int symbol
 automatically: `select` is bool-only and cross-component int defaults lose
 the parse-order race).
+
+### Runtime assertions
+
+`CONFIG_ASSERT` controls `__ASSERT` and `__ASSERT_NO_MSG`.
+It defaults to `n`, matching Zephyr.
+
+Set `CONFIG_ASSERT=y` to enable checks that log and abort on failure.
+When disabled, neither the condition nor the message is evaluated.
+Required operations must therefore stay outside assertion expressions.
+
+`BUILD_ASSERT`, `K_ASSERT`, and `k_panic()` are unaffected.

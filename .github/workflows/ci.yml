@@ -26,6 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         idf: ["v5.4", "v5.5"]
+        assertions: ["y", "n"]
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:${{ matrix.idf }}
@@ -38,6 +39,7 @@ jobs:
         run: |
           . /opt/esp/idf/export.sh
           cd test
+          echo "CONFIG_ASSERT=${{ matrix.assertions }}" >> sdkconfig.defaults
           idf.py --preview set-target linux
           idf.py build
           ./build/boreas_test.elf
@@ -47,6 +49,7 @@ jobs:
       fail-fast: false
       matrix:
         idf: ["v5.4", "v5.5"]
+        assertions: ["y", "n"]
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:${{ matrix.idf }}
@@ -59,6 +62,7 @@ jobs:
         run: |
           . /opt/esp/idf/export.sh
           cd test
+          echo "CONFIG_ASSERT=${{ matrix.assertions }}" >> sdkconfig.defaults
           idf.py set-target esp32s3
           idf.py build
 

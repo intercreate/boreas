@@ -24,6 +24,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 
 #if CONFIG_IDF_TARGET_LINUX

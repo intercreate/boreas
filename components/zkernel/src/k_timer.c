@@ -74,6 +74,7 @@ void k_timer_init(struct k_timer *timer, k_timer_expiry_t expiry_fn, k_timer_sto
 	};
 	esp_err_t err = esp_timer_create(&args, &timer->handle);
 	__ASSERT(err == ESP_OK, "k_timer_init: esp_timer_create failed");
+	(void)err;
 }
 
 void k_timer_start(struct k_timer *timer, k_timeout_t duration, k_timeout_t period)

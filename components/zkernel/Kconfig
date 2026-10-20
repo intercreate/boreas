@@ -1,5 +1,14 @@
 menu "Boreas Kernel (zkernel)"
 
+    config ASSERT
+        bool "Enable runtime assertions"
+        default n
+        help
+            Enable __ASSERT and __ASSERT_NO_MSG checks that log and abort
+            on failure. Disabled assertions do not evaluate their arguments;
+            do not put required side effects in assertion expressions.
+            Mirrors upstream Zephyr's CONFIG_ASSERT default.
+
     config RING_BUFFER_LARGE
         bool "Use 32-bit ring buffer indices"
         default n
