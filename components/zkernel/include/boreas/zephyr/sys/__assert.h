@@ -5,8 +5,8 @@
  * Zephyr-compatible runtime assertions (upstream <zephyr/sys/__assert.h>
  * spellings).
  *
- * Divergence: upstream compiles these out unless CONFIG_ASSERT=y
- * (default n); Boreas keeps them always on -- they log and abort.
+ * Enabled by CONFIG_ASSERT (default n), matching upstream Zephyr.
+ * Disabled assertions do not evaluate the condition or message.
  * NOT safe from IRAM ISR context (ESP_LOGE + abort are flash-resident).
  * Use k_panic() (sys/util.h) for unrecoverable errors in ISR/IRAM
  * context.
@@ -14,7 +14,10 @@
 
 #pragma once
 
+#include "sdkconfig.h"
+
 #ifndef __ASSERT
+#if defined(CONFIG_ASSERT) && CONFIG_ASSERT
 #include <stdlib.h> /* abort() */
 
 #include "esp_log.h"
@@ -25,6 +28,12 @@
 			abort();                                                                   \
 		}                                                                                  \
 	} while (0)
+#else
+
+#define __ASSERT(cond, msg)                                                                        \
+	do {                                                                                       \
+	} while (0)
+#endif
 #endif
 
 /* Assertion with no message (upstream spelling). */

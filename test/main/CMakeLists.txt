@@ -1,4 +1,5 @@
 set(test_srcs
+    "test_assert.c"
     "test_main.c"
     "test_timeout.c"
     "test_slist.c"

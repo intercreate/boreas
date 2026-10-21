@@ -10,6 +10,7 @@
 #include "unity.h"
 
 /* Test group declarations -- always available */
+void test_assert_group(void);
 void test_timeout_group(void);
 void test_slist_group(void);
 void test_dlist_group(void);
@@ -49,6 +50,7 @@ void app_main(void)
 	UNITY_BEGIN();
 
 	/* Layer 0: Foundation */
+	test_assert_group();
 	test_timeout_group();
 	test_slist_group();
 	test_dlist_group();
